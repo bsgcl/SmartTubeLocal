@@ -12,6 +12,28 @@ import org.robolectric.RobolectricTestRunner
 @RunWith(RobolectricTestRunner::class)
 class ChannelGroupServiceImplTest {
     @Test
+    fun firstSubscriptionPersistsWithMetadataUnavailable() {
+        val profiles = LocalProfileManager.instance()
+        val original = profiles.getActiveId()
+        val profile = profiles.create("subscription-write-regression")
+
+        try {
+            profiles.select(profile.id)
+            ChannelGroupServiceImpl.cachedChannel = null
+            ChannelGroupServiceImpl.subscribe(true, "metadata-unavailable-channel", null, null)
+
+            assertTrue(ChannelGroupServiceImpl.isSubscribed("metadata-unavailable-channel"))
+
+            profiles.select(original)
+            profiles.select(profile.id)
+            assertTrue(ChannelGroupServiceImpl.isSubscribed("metadata-unavailable-channel"))
+        } finally {
+            profiles.select(original)
+            profiles.delete(profile.id)
+        }
+    }
+
+    @Test
     fun localMembershipIsProfileScopedDurableAndMetadataIndependent() {
         val profiles = LocalProfileManager.instance()
         val original = profiles.getActiveId()
