@@ -14,7 +14,7 @@ Personal SmartTube fork for anonymous YouTube access with local-only profiles in
 
 ## Current Build
 
-The current test build is **SmartTube Local 32.52**.
+The current test build is **SmartTube Local 32.53**.
 
 Local profiles, passwords, subscriptions, playlists, Google Takeout playlist import, and subscription import have all been tested successfully.
 
@@ -24,7 +24,7 @@ Local avatars are not currently implemented.
 
 ## Download
 
-Download the current universal APK from [GitHub Releases](https://github.com/BobbyLLM/SmartTube/releases/download/v32.52-local/SmartTube_Local_32.52_universal.apk).
+Download the current universal APK from [GitHub Releases](https://github.com/BobbyLLM/SmartTube/releases/download/v32.53-local/SmartTube_Local_32.53_universal.apk).
 
 ## Importing from Google Takeout
 
