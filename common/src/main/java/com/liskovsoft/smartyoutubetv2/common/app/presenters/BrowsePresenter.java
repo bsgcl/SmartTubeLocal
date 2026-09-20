@@ -470,6 +470,9 @@ public class BrowsePresenter extends BasePresenter<BrowseView> implements Sectio
                 } else if (action == VideoMenuCallback.ACTION_UNSUBSCRIBE && isSubscriptionsSection()) {
                     removeItemAuthor(videoItem);
                     VideoMenuPresenter.instance(getContext()).closeDialog();
+                } else if (action == VideoMenuCallback.ACTION_SUBSCRIBE &&
+                        mCurrentSection != null && mCurrentSection.getId() == MediaGroup.TYPE_CHANNEL_UPLOADS) {
+                    refresh(false);
                 } else if (action == VideoMenuCallback.ACTION_REMOVE_AUTHOR) {
                     removeItemAuthor(videoItem);
                 }

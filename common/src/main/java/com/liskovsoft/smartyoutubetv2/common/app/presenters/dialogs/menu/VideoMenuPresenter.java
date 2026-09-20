@@ -93,6 +93,7 @@ public class VideoMenuPresenter extends BaseMenuPresenter {
         int ACTION_ADD_TO_QUEUE = 5;
         int ACTION_PLAY_NEXT = 6;
         int ACTION_REMOVE_AUTHOR = 7;
+        int ACTION_SUBSCRIBE = 8;
         void onItemAction(Video videoItem, int action);
     }
 
@@ -950,6 +951,10 @@ public class VideoMenuPresenter extends BaseMenuPresenter {
                 error -> MessageHelpers.showLongMessage(getContext(), error.getMessage()),
                 () -> {
                     video.isSubscribed = !video.isSubscribed;
+
+                    if (video.isSubscribed && mCallback != null) {
+                        mCallback.onItemAction(video, VideoMenuCallback.ACTION_SUBSCRIBE);
+                    }
 
                     if (!video.isSubscribed && mCallback != null) {
                         mCallback.onItemAction(video, VideoMenuCallback.ACTION_UNSUBSCRIBE);
