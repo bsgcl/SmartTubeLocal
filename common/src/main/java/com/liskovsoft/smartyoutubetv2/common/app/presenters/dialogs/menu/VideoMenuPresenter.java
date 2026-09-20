@@ -945,15 +945,18 @@ public class VideoMenuPresenter extends BaseMenuPresenter {
         Observable<Void> observable = video.isSubscribed ?
                 mMediaItemService.unsubscribeObserve(video.channelId) : mMediaItemService.subscribeObserve(video.channelId);
 
-        mSubscribeAction = RxHelper.execute(observable);
+        mSubscribeAction = RxHelper.execute(observable,
+                result -> {},
+                error -> MessageHelpers.showLongMessage(getContext(), error.getMessage()),
+                () -> {
+                    video.isSubscribed = !video.isSubscribed;
 
-        video.isSubscribed = !video.isSubscribed;
+                    if (!video.isSubscribed && mCallback != null) {
+                        mCallback.onItemAction(video, VideoMenuCallback.ACTION_UNSUBSCRIBE);
+                    }
 
-        if (!video.isSubscribed && mCallback != null) {
-            mCallback.onItemAction(video, VideoMenuCallback.ACTION_UNSUBSCRIBE);
-        }
-
-        MessageHelpers.showMessage(getContext(), getContext().getString(!video.isSubscribed ? R.string.unsubscribed_from_channel : R.string.subscribed_to_channel));
+                    MessageHelpers.showMessage(getContext(), getContext().getString(!video.isSubscribed ? R.string.unsubscribed_from_channel : R.string.subscribed_to_channel));
+                });
     }
 
     @Override
