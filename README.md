@@ -24,7 +24,7 @@ Local avatars are not currently implemented.
 
 ## Download
 
-Download the current universal APK from [GitHub Releases](https://github.com/BobbyLLM/SmartTube/releases/download/v32.53-local/SmartTube_Local_32.53_universal.apk).
+Download the current universal APK from [GitHub Releases](https://github.com/BobbyLLM/SmartTube/releases/download/v32.53-local/SmartTube_beta_32.53_universal.apk).
 
 ## Importing from Google Takeout
 
