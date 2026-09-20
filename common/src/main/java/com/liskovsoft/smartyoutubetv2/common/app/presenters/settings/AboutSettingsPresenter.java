@@ -16,6 +16,7 @@ import com.liskovsoft.smartyoutubetv2.common.app.presenters.dialogs.AppUpdatePre
 import com.liskovsoft.smartyoutubetv2.common.app.presenters.base.BasePresenter;
 import com.liskovsoft.smartyoutubetv2.common.prefs.GeneralData;
 import com.liskovsoft.smartyoutubetv2.common.utils.Utils;
+import com.liskovsoft.smartyoutubetv2.common.utils.SmartTubeLocalUpdateMigration;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -28,6 +29,7 @@ public class AboutSettingsPresenter extends BasePresenter<Void> {
     public AboutSettingsPresenter(Context context) {
         super(context);
 
+        SmartTubeLocalUpdateMigration.migrate(context);
         mUpdateChecker = new AppUpdateChecker(getContext(), null);
     }
 
