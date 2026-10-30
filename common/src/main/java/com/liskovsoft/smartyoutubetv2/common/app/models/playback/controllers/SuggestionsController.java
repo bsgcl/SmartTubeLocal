@@ -71,6 +71,13 @@ public class SuggestionsController extends BasePlayerController {
         // Remote control fix. Slow network fix. Suggestions may still be loading.
         // This could lead to changing current video info (title, id etc) to wrong one.
         disposeActions();
+        if (video != null && video.isLocalArchive) {
+            if (getPlayer() != null) {
+                getPlayer().clearSuggestions();
+                getPlayer().showSuggestions(false);
+            }
+            return;
+        }
         //mCurrentGroup = video.getGroup(); // disable garbage collected
         //appendNextSectionVideoIfNeeded(video); // ConcurrentModificationException error
     }
@@ -80,6 +87,13 @@ public class SuggestionsController extends BasePlayerController {
      */
     @Override
     public void onVideoLoaded(Video item) {
+        if (item != null && item.isLocalArchive) {
+            if (getPlayer() != null) {
+                getPlayer().clearSuggestions();
+                getPlayer().showSuggestions(false);
+            }
+            return;
+        }
         loadSuggestions(item);
     }
 

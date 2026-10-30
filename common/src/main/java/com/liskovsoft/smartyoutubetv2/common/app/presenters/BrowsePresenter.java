@@ -10,6 +10,7 @@ import androidx.annotation.Nullable;
 import com.liskovsoft.mediaserviceinterfaces.oauth.Account;
 import com.liskovsoft.mediaserviceinterfaces.data.MediaGroup;
 import com.liskovsoft.sharedutils.helpers.Helpers;
+import com.liskovsoft.sharedutils.helpers.MessageHelpers;
 import com.liskovsoft.sharedutils.locale.LocaleUtility;
 import com.liskovsoft.sharedutils.mylogger.Log;
 import com.liskovsoft.sharedutils.rx.RxHelper;
@@ -28,6 +29,7 @@ import com.liskovsoft.smartyoutubetv2.common.app.models.playback.service.VideoSt
 import com.liskovsoft.smartyoutubetv2.common.app.models.playback.service.VideoStateService.State;
 import com.liskovsoft.smartyoutubetv2.common.app.presenters.base.BasePresenter;
 import com.liskovsoft.smartyoutubetv2.common.app.presenters.dialogs.VideoActionPresenter;
+import com.liskovsoft.smartyoutubetv2.common.app.presenters.PlaybackPresenter;
 import com.liskovsoft.smartyoutubetv2.common.app.presenters.dialogs.menu.ChannelUploadsMenuPresenter;
 import com.liskovsoft.smartyoutubetv2.common.app.presenters.dialogs.menu.SectionMenuPresenter;
 import com.liskovsoft.smartyoutubetv2.common.app.presenters.dialogs.menu.VideoMenuPresenter;
@@ -40,6 +42,9 @@ import com.liskovsoft.smartyoutubetv2.common.misc.AppDataSourceManager;
 import com.liskovsoft.smartyoutubetv2.common.misc.BrowseProcessorManager;
 import com.liskovsoft.smartyoutubetv2.common.misc.MediaServiceManager;
 import com.liskovsoft.smartyoutubetv2.common.misc.MediaServiceManager.AccountChangeListener;
+import com.liskovsoft.smartyoutubetv2.common.local.LocalArchiveConstants;
+import com.liskovsoft.smartyoutubetv2.common.local.LocalArchiveRepository;
+import com.liskovsoft.smartyoutubetv2.common.local.LocalArchiveSettings;
 import com.liskovsoft.smartyoutubetv2.common.prefs.AccountsData;
 import com.liskovsoft.smartyoutubetv2.common.prefs.BlockedChannelData;
 import com.liskovsoft.smartyoutubetv2.common.prefs.MainUIData;
@@ -205,6 +210,8 @@ public class BrowsePresenter extends BasePresenter<BrowseView> implements Sectio
         mSectionsMapping.put(MediaGroup.TYPE_USER_PLAYLISTS, new BrowseSection(MediaGroup.TYPE_USER_PLAYLISTS, getContext().getString(R.string.header_playlists), BrowseSection.TYPE_ROW, R.drawable.icon_playlist, false));
         mSectionsMapping.put(MediaGroup.TYPE_NOTIFICATIONS, new BrowseSection(MediaGroup.TYPE_NOTIFICATIONS, getContext().getString(R.string.header_notifications), BrowseSection.TYPE_GRID, R.drawable.icon_notification, false));
         mSectionsMapping.put(MediaGroup.TYPE_PLAYBACK_QUEUE, new BrowseSection(MediaGroup.TYPE_PLAYBACK_QUEUE, getContext().getString(R.string.playback_queue_category_title), BrowseSection.TYPE_GRID, R.drawable.icon_queue, false));
+        mSectionsMapping.put(LocalArchiveConstants.SECTION_ID, new BrowseSection(LocalArchiveConstants.SECTION_ID,
+                getContext().getString(R.string.local_library), BrowseSection.TYPE_GRID, R.drawable.icon_playlist, false));
 
         if (getSidebarService().isSettingsSectionEnabled()) {
             mSectionsMapping.put(MediaGroup.TYPE_SETTINGS, new BrowseSection(MediaGroup.TYPE_SETTINGS, getContext().getString(R.string.header_settings), BrowseSection.TYPE_SETTINGS_GRID, R.drawable.icon_settings));
@@ -268,6 +275,8 @@ public class BrowsePresenter extends BasePresenter<BrowseView> implements Sectio
     private void initLocalGridMapping() {
         mLocalGridMappings.put(MediaGroup.TYPE_PLAYBACK_QUEUE, () -> Playlist.instance().getAllReversed());
         mLocalGridMappings.put(MediaGroup.TYPE_BLOCKED_CHANNELS, this::getBlockedChannels);
+        mLocalGridMappings.put(LocalArchiveConstants.SECTION_ID,
+                () -> LocalArchiveRepository.instance(getContext()).getLibraryVideos());
     }
 
     private List<Video> getBlockedChannels() {
@@ -434,7 +443,25 @@ public class BrowsePresenter extends BasePresenter<BrowseView> implements Sectio
             return;
         }
 
-        // Check that channels new look enabled and we're on the first columnAdd commentMore actions
+        if (item.isLocalArchive || item.hasLocalArchiveCopy) {
+            LocalArchiveRepository.instance(getContext()).startPlayback(item.videoId,
+                    new LocalArchiveRepository.Callback<LocalArchiveRepository.PlaybackSource>() {
+                        @Override
+                        public void onSuccess(LocalArchiveRepository.PlaybackSource source) {
+                            com.liskovsoft.smartyoutubetv2.common.local.LocalArchivePlaybackManager
+                                    .instance(getContext()).activate(source.stream);
+                            PlaybackPresenter.instance(getContext()).openVideo(source.video);
+                        }
+
+                        @Override
+                        public void onError(String message) {
+                            MessageHelpers.showMessage(getContext(), message);
+                        }
+                    });
+            return;
+        }
+
+        // Check that channels new look enabled and we're on the first column
         if (belongsToChannelUploadsMultiGrid(item)) {
             if (getMainUIData().isUploadsAutoLoadEnabled()) {
                 VideoActionPresenter.instance(getContext()).apply(item);
@@ -687,7 +714,39 @@ public class BrowsePresenter extends BasePresenter<BrowseView> implements Sectio
     }
 
     private void updateLocalGrid(BrowseSection section, Callable<List<Video>> items) {
-        VideoGroup videoGroup = VideoGroup.from(Helpers.get(items), section);
+        if (section.getId() == LocalArchiveConstants.SECTION_ID) {
+            if (!new LocalArchiveSettings(getContext()).isLibraryEnabledForActiveProfile()) {
+                updateLocalGridContent(section, Collections.emptyList());
+                return;
+            }
+            LocalArchiveRepository repository = LocalArchiveRepository.instance(getContext());
+            if (!repository.isScanned()) {
+                getView().showProgressBar(true);
+                repository.scanAsync(new LocalArchiveRepository.Callback<List<Video>>() {
+                    @Override
+                    public void onSuccess(List<Video> videos) {
+                        if (getView() == null || mCurrentSection == null ||
+                                mCurrentSection.getId() != LocalArchiveConstants.SECTION_ID) return;
+                        updateLocalGridContent(section, videos);
+                    }
+
+                    @Override
+                    public void onError(String message) {
+                        if (getView() != null && mCurrentSection != null &&
+                                mCurrentSection.getId() == LocalArchiveConstants.SECTION_ID) {
+                            updateLocalGridContent(section, Collections.emptyList());
+                            MessageHelpers.showMessage(getContext(), message);
+                        }
+                    }
+                });
+                return;
+            }
+        }
+        updateLocalGridContent(section, Helpers.get(items));
+    }
+
+    private void updateLocalGridContent(BrowseSection section, List<Video> videos) {
+        VideoGroup videoGroup = VideoGroup.from(videos, section);
         videoGroup.setAction(VideoGroup.ACTION_REPLACE);
         videoGroup.setId(videoGroup.hashCode());
         videoGroup.setTitle(section.getTitle());
@@ -748,6 +807,9 @@ public class BrowsePresenter extends BasePresenter<BrowseView> implements Sectio
                                 }
 
                                 VideoGroup videoGroup = VideoGroup.from(mediaGroup, section);
+                                for (Video video : videoGroup.getVideos()) {
+                                    LocalArchiveRepository.instance(getContext()).attachLocalCopy(video);
+                                }
 
                                 if (TextUtils.isEmpty(videoGroup.getTitle())) {
                                     videoGroup.setTitle(getContext().getString(R.string.suggestions));
@@ -807,6 +869,9 @@ public class BrowsePresenter extends BasePresenter<BrowseView> implements Sectio
                             }
 
                             VideoGroup videoGroup = VideoGroup.from(baseGroup, mediaGroup);
+                            for (Video video : videoGroup.getVideos()) {
+                                LocalArchiveRepository.instance(getContext()).attachLocalCopy(video);
+                            }
                             appendLocalHistory(videoGroup);
                             getView().updateSection(videoGroup);
                             mBrowseProcessor.process(videoGroup);

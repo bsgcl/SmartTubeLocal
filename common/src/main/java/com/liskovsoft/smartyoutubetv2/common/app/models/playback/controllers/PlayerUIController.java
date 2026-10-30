@@ -364,6 +364,7 @@ public class PlayerUIController extends BasePlayerController {
 
     @Override
     public void onMetadata(MediaItemMetadata metadata) {
+        if (getVideo() != null && getVideo().isLocalArchive) return;
         if (getPlayer() == null) {
             return;
         }
@@ -575,6 +576,14 @@ public class PlayerUIController extends BasePlayerController {
     @Override
     public void onButtonClicked(int buttonId, int buttonState) {
         if (getPlayer() == null) {
+            return;
+        }
+
+        if (getVideo() != null && getVideo().isLocalArchive &&
+                (buttonId == R.id.action_subscribe || buttonId == R.id.action_channel ||
+                        buttonId == R.id.action_share || buttonId == R.id.action_info ||
+                        buttonId == R.id.action_search || buttonId == R.id.action_playlist_add ||
+                        buttonId == R.id.action_thumbs_down || buttonId == R.id.action_thumbs_up)) {
             return;
         }
 

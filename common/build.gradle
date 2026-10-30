@@ -85,6 +85,14 @@ dependencies {
 
     implementation 'androidx.media:media:' + mediaXVersion // exoplayer fix
 
+    // Pinned NovaPlayerKids SMBJ donor version for the local archive's read-only SMB path.
+    implementation('com.hierynomus:smbj:0.14.0') {
+    // Use the matching Java 8 BC artifact: this app's AGP/D8 toolchain fails on jdk18on 1.79.
+        exclude group: 'org.bouncycastle', module: 'bcprov-jdk18on'
+    }
+    implementation 'org.bouncycastle:bcprov-jdk15to18:1.79'
+    implementation 'com.google.code.gson:gson:' + gsonVersion
+
     implementation 'com.github.bumptech.glide:glide:' + glideVersion
 
     implementation 'androidx.work:work-runtime:' + workVersion

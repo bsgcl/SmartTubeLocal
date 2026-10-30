@@ -488,6 +488,10 @@ public class VideoStateController extends BasePlayerController {
 
         savePosition();
 
+        if (getVideo() != null && getVideo().isLocalArchive) {
+            return; // VideoStateService remains profile-local; never sync local items to YouTube.
+        }
+
         if (!isBeginEmbed()) {
             updateHistory();
             syncWithPlaylists();
@@ -588,7 +592,7 @@ public class VideoStateController extends BasePlayerController {
     private void updateHistory() {
         Video video = getVideo();
 
-        if (video == null || mIncognito || getPlayer() == null || !getPlayer().containsMedia()
+        if (video == null || video.isLocalArchive || mIncognito || getPlayer() == null || !getPlayer().containsMedia()
                 || (video.isRemote && getRemoteControlData().isRemoteHistoryDisabled())
                 || getGeneralData().getHistoryState() == GeneralData.HISTORY_DISABLED) {
             return;

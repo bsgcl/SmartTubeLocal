@@ -60,6 +60,11 @@
         tools:replace="android:theme,android:allowBackup"
         tools:ignore="GoogleAppIndexingWarning,LockedOrientationActivity,UnusedAttribute,DiscouragedApi">
 
+        <provider
+            android:name="com.liskovsoft.leanbackassistant.search.VideoContentProvider"
+            android:authorities="${searchAuthority}"
+            tools:replace="android:authorities" />
+
         <!-- Screen Mirror (e.g. DIAL) for Amazon TV -->
         <!-- Not implemented yet( -->
         <!--<meta-data android:name="whisperplay" android:resource="@xml/whisperplay"/>-->

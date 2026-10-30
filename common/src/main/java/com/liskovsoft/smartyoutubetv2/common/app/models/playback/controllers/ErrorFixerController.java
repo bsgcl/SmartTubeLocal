@@ -32,6 +32,10 @@ public class ErrorFixerController extends BasePlayerController implements OnLong
 
     @Override
     public void onEngineError(int type, int rendererIndex, Throwable error) {
+        if (getVideo() != null && getVideo().isLocalArchive) {
+            if (getPlayer() != null) getPlayer().setTitle("Local SMB stream failed. Check the archive connection.");
+            return;
+        }
         Log.e(TAG, "Player error occurred: %s. Trying to fix…", type);
 
         runEngineErrorAction(type, rendererIndex, error);
@@ -39,6 +43,7 @@ public class ErrorFixerController extends BasePlayerController implements OnLong
 
     @Override
     public void onLongBuffering() {
+        if (getVideo() != null && getVideo().isLocalArchive) return;
         if (getPlayer() == null) {
             return;
         }
@@ -293,6 +298,10 @@ public class ErrorFixerController extends BasePlayerController implements OnLong
     }
 
     public void runFormatErrorAction(Throwable error) {
+        if (getVideo() != null && getVideo().isLocalArchive) {
+            if (getPlayer() != null) getPlayer().setTitle("Local SMB stream failed. Check the archive connection.");
+            return;
+        }
         if (getPlayer() == null) {
             return;
         }

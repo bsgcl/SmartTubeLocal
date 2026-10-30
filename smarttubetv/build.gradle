@@ -55,10 +55,13 @@ android {
     defaultConfig {
         // values linked with applicationId: searchable.searchSuggestAuthority, searchable.searchSuggestIntentData, VideoContract.CONTENT_AUTHORITY
         applicationId "app.smarttube"
+        manifestPlaceholders = [searchAuthority: 'org.smarttube']
+        resValue 'string', 'search_authority', 'org.smarttube'
+        resValue 'string', 'search_suggest_intent_data', 'content://org.smarttube/video'
         minSdkVersion project.properties.minSdkVersion
         targetSdkVersion project.properties.targetSdkVersion
-        versionCode 2443
-        versionName "32.53"
+        versionCode 2446
+        versionName "32.56"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField "long", "TIMESTAMP", System.currentTimeMillis() + "L"
 
@@ -113,6 +116,17 @@ android {
         }
         // Use same key for release and debug for testing
         debug {
+            if (project.findProperty('localSmbProof') == 'true') {
+                applicationIdSuffix '.localsmbproof'
+                manifestPlaceholders = [searchAuthority: 'org.smarttube.localsmbproof']
+                resValue 'string', 'search_authority', 'org.smarttube.localsmbproof'
+                resValue 'string', 'search_suggest_intent_data', 'content://org.smarttube.localsmbproof/video'
+            } else if (project.findProperty('localSmbInteractionTest') == 'true') {
+                applicationIdSuffix '.localsettingsinteractiontest'
+                manifestPlaceholders = [searchAuthority: 'org.smarttube.localsettingsinteractiontest']
+                resValue 'string', 'search_authority', 'org.smarttube.localsettingsinteractiontest'
+                resValue 'string', 'search_suggest_intent_data', 'content://org.smarttube.localsettingsinteractiontest/video'
+            }
             if (keystorePropertiesFile.exists()) {
                 signingConfig signingConfigs.release
             }

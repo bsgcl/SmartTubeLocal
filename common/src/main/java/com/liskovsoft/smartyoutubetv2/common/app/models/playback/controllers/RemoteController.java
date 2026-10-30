@@ -61,6 +61,10 @@ public class RemoteController extends BasePlayerController implements OnDataChan
     @Override
     public void onNewVideo(Video item) {
         if (item != null) {
+            if (item.isLocalArchive) {
+                item.isRemote = false;
+                return;
+            }
             Log.d(TAG, "Open video. Is remote connected: %s", mConnected);
             item.isRemote = mConnected;
         }
@@ -78,6 +82,7 @@ public class RemoteController extends BasePlayerController implements OnDataChan
 
     @Override
     public void onVideoLoaded(Video item) {
+        if (item != null && item.isLocalArchive) return;
         if (getPlayer() == null) {
             return;
         }
@@ -95,16 +100,19 @@ public class RemoteController extends BasePlayerController implements OnDataChan
 
     @Override
     public void onPlay() {
+        if (getVideo() != null && getVideo().isLocalArchive) return;
         postPlayState(RemoteControlService.STATE_PLAYING);
     }
 
     @Override
     public void onPause() {
+        if (getVideo() != null && getVideo().isLocalArchive) return;
         postPlayState(RemoteControlService.STATE_PAUSED);
     }
 
     @Override
     public void onPlayEnd() {
+        if (getVideo() != null && getVideo().isLocalArchive) return;
         switch (getPlayerData().getPlaybackMode()) {
             // The IDLE state just hangs phone's current video (spinning circle)
             case PlayerConstants.PLAYBACK_MODE_CLOSE:
@@ -132,6 +140,7 @@ public class RemoteController extends BasePlayerController implements OnDataChan
 
     @Override
     public void onEngineReleased() {
+        if (getVideo() != null && getVideo().isLocalArchive) return;
         // The IDLE state just hangs phone's current video (spinning circle)
         postPlayState(RemoteControlService.STATE_PAUSED);
         // Below doesn't work on Vanced

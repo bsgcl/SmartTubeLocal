@@ -16,6 +16,7 @@ import com.liskovsoft.smartyoutubetv2.common.app.models.data.Playlist;
 import com.liskovsoft.smartyoutubetv2.common.app.models.data.SimpleMediaItem;
 import com.liskovsoft.smartyoutubetv2.common.app.models.data.Video;
 import com.liskovsoft.smartyoutubetv2.common.app.models.data.VideoGroup;
+import com.liskovsoft.smartyoutubetv2.common.local.LocalArchivePlaybackManager;
 import com.liskovsoft.smartyoutubetv2.common.app.models.playback.BasePlayerController;
 import com.liskovsoft.smartyoutubetv2.common.app.models.playback.manager.PlayerConstants;
 import com.liskovsoft.smartyoutubetv2.common.app.presenters.AppDialogPresenter;
@@ -77,9 +78,13 @@ public class VideoLoaderController extends BasePlayerController {
             return;
         }
 
+        if (!item.isLocalArchive || !LocalArchivePlaybackManager.instance(getContext()).isActiveFor(item.localStreamUrl)) {
+            LocalArchivePlaybackManager.instance(getContext()).closeActive();
+        }
+
         item.isShuffled = false;
 
-        if (!item.fromQueue && !item.belongsToPlaybackQueue()) {
+        if (!item.isLocalArchive && !item.fromQueue && !item.belongsToPlaybackQueue()) {
             mPlaylist.add(item);
         } else {
             item.fromQueue = false;
@@ -107,6 +112,7 @@ public class VideoLoaderController extends BasePlayerController {
     @Override
     public void onEngineReleased() {
         disposeActions();
+        LocalArchivePlaybackManager.instance(getContext()).closeActive();
     }
 
     @Override
@@ -129,6 +135,11 @@ public class VideoLoaderController extends BasePlayerController {
 
     @Override
     public boolean onNextClicked() {
+        if (getVideo() != null && getVideo().isLocalArchive) {
+            LocalArchivePlaybackManager.instance(getContext()).closeActive();
+            if (getPlayer() != null) getPlayer().finishReally();
+            return true;
+        }
         if (getGeneralData().isChildModeEnabled()) {
             onPlayEnd();
         } else {
@@ -139,6 +150,7 @@ public class VideoLoaderController extends BasePlayerController {
     }
 
     public void loadPrevious() {
+        if (getVideo() != null && getVideo().isLocalArchive) return;
         if (getPlayer() == null) {
             return;
         }
@@ -151,6 +163,7 @@ public class VideoLoaderController extends BasePlayerController {
     }
 
     public void loadNext() {
+        if (getVideo() != null && getVideo().isLocalArchive) return;
         if (getPlayer() == null || getVideo() == null) {
             return;
         }
@@ -171,6 +184,12 @@ public class VideoLoaderController extends BasePlayerController {
     @Override
     public void onPlayEnd() {
         if (getPlayer() == null) {
+            return;
+        }
+
+        if (getVideo() != null && getVideo().isLocalArchive) {
+            LocalArchivePlaybackManager.instance(getContext()).closeActive();
+            getPlayer().showOverlay(true);
             return;
         }
 
@@ -206,7 +225,20 @@ public class VideoLoaderController extends BasePlayerController {
             mPlaylist.setCurrent(item);
             getPlayer().setVideo(item);
             getPlayer().resetPlayerState();
-            loadFormatInfo(item);
+            if (item.isLocalArchive) {
+                if (item.localStreamUrl == null ||
+                        !LocalArchivePlaybackManager.instance(getContext()).isActiveFor(item.localStreamUrl)) {
+                    LocalArchivePlaybackManager.instance(getContext()).closeActive();
+                    getPlayer().showProgressBar(false);
+                    getPlayer().setTitle("Local archive stream is unavailable");
+                    return;
+                }
+                disposeActions();
+                getPlayer().showProgressBar(true);
+                getPlayer().openUrlList(java.util.Collections.singletonList(item.localStreamUrl));
+            } else {
+                loadFormatInfo(item);
+            }
         }
     }
 

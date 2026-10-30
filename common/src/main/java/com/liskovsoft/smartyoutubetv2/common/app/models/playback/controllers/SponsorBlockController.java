@@ -96,6 +96,11 @@ public class SponsorBlockController extends BasePlayerController {
     public void onVideoLoaded(Video item) {
         disposeActions();
 
+        if (item != null && item.isLocalArchive) {
+            if (getPlayer() != null) getPlayer().setButtonState(R.id.action_content_block, PlayerUI.BUTTON_OFF);
+            return;
+        }
+
         if (getPlayer() == null) {
             return;
         }
@@ -110,6 +115,10 @@ public class SponsorBlockController extends BasePlayerController {
 
     @Override
     public void onMetadata(MediaItemMetadata metadata) {
+        if (getVideo() != null && getVideo().isLocalArchive) {
+            disposeActions();
+            return;
+        }
         // Disable sponsor for the live streams.
         // Fix when using remote control.
         if (!getSponsorBlockData().isSponsorBlockEnabled() || !checkVideo(getVideo())) {

@@ -77,6 +77,13 @@ public final class Video {
     public boolean isMovie;
     public boolean isSubscribed;
     public boolean isRemote;
+    /** True only for entries opened through the local archive path. */
+    public boolean isLocalArchive;
+    /** True when a permission-checked local copy is available for this video id. */
+    public boolean hasLocalArchiveCopy;
+    public String localArchivePath;
+    public String localStreamUrl;
+    public long localArchiveLength = -1;
     public int groupPosition = -1; // group position in multi-grid fragments
     public String clickTrackingParams;
     public boolean isSynced;
@@ -191,6 +198,11 @@ public final class Video {
         video.clickTrackingParams = item.clickTrackingParams;
         video.mediaItem = item.mediaItem;
         video.group = item.group;
+        video.isLocalArchive = item.isLocalArchive;
+        video.hasLocalArchiveCopy = item.hasLocalArchiveCopy;
+        video.localArchivePath = item.localArchivePath;
+        video.localStreamUrl = item.localStreamUrl;
+        video.localArchiveLength = item.localArchiveLength;
 
         return video;
     }
