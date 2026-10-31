@@ -236,6 +236,7 @@ public class VideoLoaderController extends BasePlayerController {
                 disposeActions();
                 getPlayer().showProgressBar(true);
                 getPlayer().openUrlList(java.util.Collections.singletonList(item.localStreamUrl));
+                getPlayer().showBackground(null);
             } else {
                 loadFormatInfo(item);
             }
