@@ -1,6 +1,14 @@
 {
   "package": {
-    "downloadUrl": "https://github.com/BobbyLLM/SmartTube/releases/download/v32.53-local/SmartTube_beta_32.53_universal.apk"
+    "downloadUrl": "https://github.com/bsgcl/SmartTubeLocal/releases/download/v32.57-local/SmartTube_beta_32.57_universal.apk"
+  },
+  "32.57": {
+    "versionCode": 2447,
+    "changelog": [
+      "Added offline playback from an SMB archive.",
+      "Enabled Local Library access per profile.",
+      "Fixed the black picture during local playback."
+    ]
   },
   "32.53": {
     "versionCode": 2443,
