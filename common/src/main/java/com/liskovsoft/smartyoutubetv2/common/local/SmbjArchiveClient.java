@@ -33,7 +33,7 @@ import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 /** Read-only SMB2/SMB3 access for a single configured archive share. */
-public final class SmbjArchiveClient implements AutoCloseable {
+public final class SmbjArchiveClient implements java.io.Closeable {
     public static final class Entry {
         public final String name;
         public final boolean directory;

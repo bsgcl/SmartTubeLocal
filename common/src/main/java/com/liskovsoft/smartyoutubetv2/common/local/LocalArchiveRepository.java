@@ -14,7 +14,7 @@ import org.json.JSONException;
 
 import java.io.File;
 import java.io.FileOutputStream;
-import java.nio.charset.StandardCharsets;
+import java.nio.charset.Charset;
 import java.security.MessageDigest;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -194,7 +194,7 @@ public final class LocalArchiveRepository implements AppPrefs.ProfileChangeListe
                             if (sidecars.size() >= MAX_SIDECARS || System.currentTimeMillis() >= deadline) continue;
                             try {
                                 byte[] bytes = client.readSmallFile(fullPath, MAX_METADATA_BYTES);
-                                sidecars.put(relative, new String(bytes, StandardCharsets.UTF_8));
+                                sidecars.put(relative, new String(bytes, Charset.forName("UTF-8")));
                             } catch (Exception ignored) {
                                 // A malformed or unreadable sidecar is omitted; other entries remain usable.
                             }
@@ -296,7 +296,7 @@ public final class LocalArchiveRepository implements AppPrefs.ProfileChangeListe
 
     private static String digest(String value) {
         try {
-            byte[] hash = MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8));
+            byte[] hash = MessageDigest.getInstance("SHA-256").digest(value.getBytes(Charset.forName("UTF-8")));
             StringBuilder out = new StringBuilder();
             for (byte b : hash) out.append(String.format(java.util.Locale.ROOT, "%02x", b));
             return out.toString();

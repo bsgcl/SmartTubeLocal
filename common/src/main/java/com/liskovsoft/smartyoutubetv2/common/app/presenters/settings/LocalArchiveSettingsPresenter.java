@@ -2,6 +2,7 @@ package com.liskovsoft.smartyoutubetv2.common.app.presenters.settings;
 
 import android.app.ProgressDialog;
 import android.content.Context;
+import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.text.InputType;
@@ -39,6 +40,11 @@ public final class LocalArchiveSettingsPresenter extends BasePresenter<Void> {
     }
 
     public void show() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+            Toast.makeText(getContext(), "Local Library requires Android 6.0 or newer for encrypted SMB credentials",
+                    Toast.LENGTH_LONG).show();
+            return;
+        }
         LocalArchiveSettings settings = new LocalArchiveSettings(getContext());
         LocalArchiveSettings.Config config = settings.getConfig();
         AppDialogPresenter menu = AppDialogPresenter.instance(getContext());

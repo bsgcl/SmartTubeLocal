@@ -2,13 +2,18 @@ package com.liskovsoft.smartyoutubetv2.common.local;
 
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.os.Build;
+
+import androidx.annotation.RequiresApi;
 import android.security.keystore.KeyGenParameterSpec;
 import android.security.keystore.KeyProperties;
 import android.util.Base64;
 
+import androidx.annotation.RequiresApi;
+
 import com.liskovsoft.youtubeapi.service.internal.LocalProfileManager;
 
-import java.nio.charset.StandardCharsets;
+import java.nio.charset.Charset;
 import java.security.KeyStore;
 import java.security.MessageDigest;
 
@@ -98,7 +103,7 @@ public final class LocalArchiveSettings {
         String activeId = LocalProfileManager.instance().getActiveId();
         if (activeId == null || activeId.isEmpty()) activeId = "default";
         try {
-            byte[] digest = MessageDigest.getInstance("SHA-256").digest(activeId.getBytes(StandardCharsets.UTF_8));
+            byte[] digest = MessageDigest.getInstance("SHA-256").digest(activeId.getBytes(Charset.forName("UTF-8")));
             return Base64.encodeToString(digest, Base64.NO_WRAP | Base64.URL_SAFE);
         } catch (Exception e) {
             return Integer.toHexString(activeId.hashCode());
@@ -106,51 +111,66 @@ public final class LocalArchiveSettings {
     }
 
     private String encrypt(String value) {
-        try {
-            Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
-            cipher.init(Cipher.ENCRYPT_MODE, getOrCreateKey());
-            byte[] encrypted = cipher.doFinal(value.getBytes(StandardCharsets.UTF_8));
-            byte[] iv = cipher.getIV();
-            byte[] packed = new byte[iv.length + encrypted.length];
-            System.arraycopy(iv, 0, packed, 0, iv.length);
-            System.arraycopy(encrypted, 0, packed, iv.length, encrypted.length);
-            return Base64.encodeToString(packed, Base64.NO_WRAP);
-        } catch (Exception e) {
-            throw new IllegalStateException("Unable to protect SMB credentials on this device", e);
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+            throw new IllegalArgumentException("Encrypted SMB credentials require Android 6.0 or newer");
         }
+        return Api23.encrypt(value);
     }
 
     private String decrypt(String value) {
-        if (value == null || value.isEmpty()) return "";
-        try {
-            byte[] packed = Base64.decode(value, Base64.NO_WRAP);
-            int ivLength = 12;
-            byte[] iv = new byte[ivLength];
-            byte[] encrypted = new byte[packed.length - ivLength];
-            System.arraycopy(packed, 0, iv, 0, ivLength);
-            System.arraycopy(packed, ivLength, encrypted, 0, encrypted.length);
-            Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
-            cipher.init(Cipher.DECRYPT_MODE, getOrCreateKey(), new GCMParameterSpec(128, iv));
-            return new String(cipher.doFinal(encrypted), StandardCharsets.UTF_8);
-        } catch (Exception e) {
-            return "";
-        }
+        if (value == null || value.isEmpty() || Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return "";
+        return Api23.decrypt(value);
     }
 
-    private SecretKey getOrCreateKey() throws Exception {
-        KeyStore keyStore = KeyStore.getInstance("AndroidKeyStore");
-        keyStore.load(null);
-        java.security.Key existing = keyStore.getKey(KEY_ALIAS, null);
-        if (existing instanceof SecretKey) return (SecretKey) existing;
+    @RequiresApi(Build.VERSION_CODES.M)
+    private static final class Api23 {
+        private static String encrypt(String value) {
+            try {
+                Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+                cipher.init(Cipher.ENCRYPT_MODE, getOrCreateKey());
+                byte[] encrypted = cipher.doFinal(value.getBytes(Charset.forName("UTF-8")));
+                byte[] iv = cipher.getIV();
+                byte[] packed = new byte[iv.length + encrypted.length];
+                System.arraycopy(iv, 0, packed, 0, iv.length);
+                System.arraycopy(encrypted, 0, packed, iv.length, encrypted.length);
+                return Base64.encodeToString(packed, Base64.NO_WRAP);
+            } catch (Exception e) {
+                throw new IllegalStateException("Unable to protect SMB credentials on this device", e);
+            }
+        }
 
-        KeyGenerator generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore");
-        generator.init(new KeyGenParameterSpec.Builder(KEY_ALIAS,
-                KeyProperties.PURPOSE_ENCRYPT | KeyProperties.PURPOSE_DECRYPT)
-                .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
-                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
-                .setRandomizedEncryptionRequired(true)
-                .build());
-        return generator.generateKey();
+        private static String decrypt(String value) {
+            if (value == null || value.isEmpty()) return "";
+            try {
+                byte[] packed = Base64.decode(value, Base64.NO_WRAP);
+                int ivLength = 12;
+                byte[] iv = new byte[ivLength];
+                byte[] encrypted = new byte[packed.length - ivLength];
+                System.arraycopy(packed, 0, iv, 0, ivLength);
+                System.arraycopy(packed, ivLength, encrypted, 0, encrypted.length);
+                Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+                cipher.init(Cipher.DECRYPT_MODE, getOrCreateKey(), new GCMParameterSpec(128, iv));
+                return new String(cipher.doFinal(encrypted), Charset.forName("UTF-8"));
+            } catch (Exception e) {
+                return "";
+            }
+        }
+
+        private static SecretKey getOrCreateKey() throws Exception {
+            KeyStore keyStore = KeyStore.getInstance("AndroidKeyStore");
+            keyStore.load(null);
+            java.security.Key existing = keyStore.getKey(KEY_ALIAS, null);
+            if (existing instanceof SecretKey) return (SecretKey) existing;
+
+            KeyGenerator generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore");
+            generator.init(new KeyGenParameterSpec.Builder(KEY_ALIAS,
+                    KeyProperties.PURPOSE_ENCRYPT | KeyProperties.PURPOSE_DECRYPT)
+                    .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                    .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                    .setRandomizedEncryptionRequired(true)
+                    .build());
+            return generator.generateKey();
+        }
     }
 
     private static String clean(String value) {

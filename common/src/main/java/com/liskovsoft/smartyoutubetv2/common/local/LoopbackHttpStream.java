@@ -11,7 +11,7 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.SocketException;
 import java.net.URLDecoder;
-import java.nio.charset.StandardCharsets;
+import java.nio.charset.Charset;
 import java.util.Locale;
 import java.util.UUID;
 import java.util.concurrent.ArrayBlockingQueue;
@@ -20,7 +20,7 @@ import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
 /** Short-lived HTTP byte-range endpoint. It binds only to IPv4 loopback. */
-public final class LoopbackHttpStream implements AutoCloseable {
+public final class LoopbackHttpStream implements java.io.Closeable {
     public static final class ByteRange {
         public final long start;
         public final long end;
@@ -143,7 +143,7 @@ public final class LoopbackHttpStream implements AutoCloseable {
     private void serve(Socket socket) {
         try (Socket requestSocket = socket) {
             BufferedReader reader = new BufferedReader(new InputStreamReader(
-                    requestSocket.getInputStream(), StandardCharsets.US_ASCII));
+                    requestSocket.getInputStream(), Charset.forName("US-ASCII")));
             String request = reader.readLine();
             if (request == null || request.length() > 4096) {
                 writeError(requestSocket, 400, "Bad Request");
@@ -230,7 +230,7 @@ public final class LoopbackHttpStream implements AutoCloseable {
     }
 
     private static void writeAscii(OutputStream output, String value) throws IOException {
-        output.write(value.getBytes(StandardCharsets.US_ASCII));
+        output.write(value.getBytes(Charset.forName("US-ASCII")));
     }
 
     private static void copyExactly(InputStream input, OutputStream output, long length) throws IOException {
