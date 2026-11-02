@@ -128,9 +128,7 @@ In fact, please *do*. Fuck EvilCorp (tm) and host as much of your own shit as yo
 
 PS: No support or compatibility guarantee is provided.
 
-PPS: Pull requests are not accepted at this time. I don't have the time to review :(
-
-Please DO fork and fiddle with this to your heart's content.
+PPS: Pull requests are not accepted at this time. Please DO fork and fiddle with this to your heart's content.
 
 ## Based on SmartTube
 
