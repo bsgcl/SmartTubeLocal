@@ -43,6 +43,7 @@ import com.liskovsoft.smartyoutubetv2.common.misc.BrowseProcessorManager;
 import com.liskovsoft.smartyoutubetv2.common.misc.MediaServiceManager;
 import com.liskovsoft.smartyoutubetv2.common.misc.MediaServiceManager.AccountChangeListener;
 import com.liskovsoft.smartyoutubetv2.common.local.LocalArchiveConstants;
+import com.liskovsoft.smartyoutubetv2.common.local.LocalArchiveChannelRows;
 import com.liskovsoft.smartyoutubetv2.common.local.LocalArchiveRepository;
 import com.liskovsoft.smartyoutubetv2.common.local.LocalArchiveSettings;
 import com.liskovsoft.smartyoutubetv2.common.prefs.AccountsData;
@@ -54,7 +55,6 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
@@ -769,28 +769,23 @@ public class BrowsePresenter extends BasePresenter<BrowseView> implements Sectio
         clear.setAction(VideoGroup.ACTION_REPLACE);
         getView().updateSection(clear);
 
-        Map<String, List<Video>> channels = new LinkedHashMap<>();
-        for (Video video : videos) {
-            // The archive index supplies the original channel ID. Folder names are not identity.
-            String key = !TextUtils.isEmpty(video.channelId) ? video.channelId :
-                    "unknown:" + (video.author == null ? "" : video.author);
-            List<Video> channelVideos = channels.get(key);
-            if (channelVideos == null) {
-                channelVideos = new ArrayList<>();
-                channels.put(key, channelVideos);
-            }
-            channelVideos.add(video);
-        }
+        List<LocalArchiveChannelRows.Row<Video>> channels = LocalArchiveChannelRows.group(videos,
+                new LocalArchiveChannelRows.Metadata<Video>() {
+                    @Override
+                    public String channelId(Video video) {
+                        return video.channelId;
+                    }
 
-        for (Map.Entry<String, List<Video>> channel : channels.entrySet()) {
-            List<Video> channelVideos = channel.getValue();
-            if (channelVideos.isEmpty()) continue;
-            String channelName = channelVideos.get(0).author;
-            if (TextUtils.isEmpty(channelName)) channelName = "Unknown channel";
+                    @Override
+                    public String channelName(Video video) {
+                        return video.author;
+                    }
+                });
 
-            VideoGroup row = VideoGroup.from(channelVideos, section);
-            row.setId(("local-channel:" + channel.getKey()).hashCode());
-            row.setTitle("[LOCAL] " + channelName);
+        for (LocalArchiveChannelRows.Row<Video> channel : channels) {
+            VideoGroup row = VideoGroup.from(channel.videos, section);
+            row.setId(channel.id);
+            row.setTitle(channel.title);
             getView().updateSection(row);
         }
         getView().showProgressBar(false);
