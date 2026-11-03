@@ -54,6 +54,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
@@ -211,7 +212,7 @@ public class BrowsePresenter extends BasePresenter<BrowseView> implements Sectio
         mSectionsMapping.put(MediaGroup.TYPE_NOTIFICATIONS, new BrowseSection(MediaGroup.TYPE_NOTIFICATIONS, getContext().getString(R.string.header_notifications), BrowseSection.TYPE_GRID, R.drawable.icon_notification, false));
         mSectionsMapping.put(MediaGroup.TYPE_PLAYBACK_QUEUE, new BrowseSection(MediaGroup.TYPE_PLAYBACK_QUEUE, getContext().getString(R.string.playback_queue_category_title), BrowseSection.TYPE_GRID, R.drawable.icon_queue, false));
         mSectionsMapping.put(LocalArchiveConstants.SECTION_ID, new BrowseSection(LocalArchiveConstants.SECTION_ID,
-                getContext().getString(R.string.local_library), BrowseSection.TYPE_GRID, R.drawable.icon_playlist, false));
+                getContext().getString(R.string.local_library), BrowseSection.TYPE_ROW, R.drawable.icon_playlist, false));
 
         if (getSidebarService().isSettingsSectionEnabled()) {
             mSectionsMapping.put(MediaGroup.TYPE_SETTINGS, new BrowseSection(MediaGroup.TYPE_SETTINGS, getContext().getString(R.string.header_settings), BrowseSection.TYPE_SETTINGS_GRID, R.drawable.icon_settings));
@@ -689,8 +690,12 @@ public class BrowsePresenter extends BasePresenter<BrowseView> implements Sectio
                 }
                 break;
             case BrowseSection.TYPE_ROW:
-                Observable<List<MediaGroup>> groups = mRowMapping.get(section.getId());
-                updateVideoRows(section, groups, section.isAuthOnly());
+                if (section.getId() == LocalArchiveConstants.SECTION_ID) {
+                    updateLocalGrid(section, mLocalGridMappings.get(section.getId()));
+                } else {
+                    Observable<List<MediaGroup>> groups = mRowMapping.get(section.getId());
+                    updateVideoRows(section, groups, section.isAuthOnly());
+                }
                 break;
             case BrowseSection.TYPE_SETTINGS_GRID:
                 Callable<List<SettingsItem>> items = mSettingsGridMapping.get(section.getId());
@@ -746,11 +751,48 @@ public class BrowsePresenter extends BasePresenter<BrowseView> implements Sectio
     }
 
     private void updateLocalGridContent(BrowseSection section, List<Video> videos) {
+        if (section.getType() == BrowseSection.TYPE_ROW) {
+            updateLocalChannelRows(section, videos);
+            return;
+        }
         VideoGroup videoGroup = VideoGroup.from(videos, section);
         videoGroup.setAction(VideoGroup.ACTION_REPLACE);
         videoGroup.setId(videoGroup.hashCode());
         videoGroup.setTitle(section.getTitle());
         getView().updateSection(videoGroup);
+        getView().showProgressBar(false);
+    }
+
+    /** Display one local row per canonical YouTube channel ID, without a network lookup. */
+    private void updateLocalChannelRows(BrowseSection section, List<Video> videos) {
+        VideoGroup clear = VideoGroup.from(section);
+        clear.setAction(VideoGroup.ACTION_REPLACE);
+        getView().updateSection(clear);
+
+        Map<String, List<Video>> channels = new LinkedHashMap<>();
+        for (Video video : videos) {
+            // The archive index supplies the original channel ID. Folder names are not identity.
+            String key = !TextUtils.isEmpty(video.channelId) ? video.channelId :
+                    "unknown:" + (video.author == null ? "" : video.author);
+            List<Video> channelVideos = channels.get(key);
+            if (channelVideos == null) {
+                channelVideos = new ArrayList<>();
+                channels.put(key, channelVideos);
+            }
+            channelVideos.add(video);
+        }
+
+        for (Map.Entry<String, List<Video>> channel : channels.entrySet()) {
+            List<Video> channelVideos = channel.getValue();
+            if (channelVideos.isEmpty()) continue;
+            String channelName = channelVideos.get(0).author;
+            if (TextUtils.isEmpty(channelName)) channelName = "Unknown channel";
+
+            VideoGroup row = VideoGroup.from(channelVideos, section);
+            row.setId(("local-channel:" + channel.getKey()).hashCode());
+            row.setTitle("[LOCAL] " + channelName);
+            getView().updateSection(row);
+        }
         getView().showProgressBar(false);
     }
 
