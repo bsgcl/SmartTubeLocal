@@ -14,7 +14,7 @@ SmartTube Local combines YouTube *without* Google sign-in, *offline playback ove
 
 ## Local Library (SMB)
 
-Local Library brings downloaded videos into SmartTube Local's familiar browse screen. SmartTube builds library cards from the archive metadata. There is no CSV to maintain and no need to add video IDs by hand (though you do you).
+Local Library brings downloaded videos into SmartTube Local's familiar browse screen. It groups local videos into channel rows by the original YouTube `channel_id` from the archive metadata. Each row uses a `[LOCAL]` prefix, and each video retains its own title and thumbnail. No CSV or manual video ID entry is required.
 
 Local Library scans the archive automatically on first access after the app process starts, then reuses the results. It does not continuously check for new downloads at present. After new downloads, choose **Test and scan archive** in **Settings → Local Library** to refresh the list.
 
