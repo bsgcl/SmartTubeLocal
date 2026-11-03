@@ -78,9 +78,7 @@ public class VideoLoaderController extends BasePlayerController {
             return;
         }
 
-        if (!item.isLocalArchive || !LocalArchivePlaybackManager.instance(getContext()).isActiveFor(item.localStreamUrl)) {
-            LocalArchivePlaybackManager.instance(getContext()).closeActive();
-        }
+        LocalArchivePlaybackManager.instance(getContext()).onNewVideo(item);
 
         item.isShuffled = false;
 
@@ -112,7 +110,7 @@ public class VideoLoaderController extends BasePlayerController {
     @Override
     public void onEngineReleased() {
         disposeActions();
-        LocalArchivePlaybackManager.instance(getContext()).closeActive();
+        LocalArchivePlaybackManager.instance(getContext()).closeAll();
     }
 
     @Override
@@ -120,6 +118,8 @@ public class VideoLoaderController extends BasePlayerController {
         if (getPlayer() == null) {
             return;
         }
+
+        LocalArchivePlaybackManager.instance(getContext()).onVideoLoaded(video);
         
         getPlayer().setButtonState(R.id.action_repeat, video.finishOnEnded ? PlayerConstants.PLAYBACK_MODE_CLOSE : getPlayerData().getPlaybackMode());
         // Can't set title at this point
@@ -135,11 +135,6 @@ public class VideoLoaderController extends BasePlayerController {
 
     @Override
     public boolean onNextClicked() {
-        if (getVideo() != null && getVideo().isLocalArchive) {
-            LocalArchivePlaybackManager.instance(getContext()).closeActive();
-            if (getPlayer() != null) getPlayer().finishReally();
-            return true;
-        }
         if (getGeneralData().isChildModeEnabled()) {
             onPlayEnd();
         } else {
@@ -150,7 +145,6 @@ public class VideoLoaderController extends BasePlayerController {
     }
 
     public void loadPrevious() {
-        if (getVideo() != null && getVideo().isLocalArchive) return;
         if (getPlayer() == null) {
             return;
         }
@@ -163,7 +157,6 @@ public class VideoLoaderController extends BasePlayerController {
     }
 
     public void loadNext() {
-        if (getVideo() != null && getVideo().isLocalArchive) return;
         if (getPlayer() == null || getVideo() == null) {
             return;
         }
@@ -172,6 +165,8 @@ public class VideoLoaderController extends BasePlayerController {
 
         if (next != null) {
             openVideoInt(next);
+        } else if (hasLocalPlaylistContext(getVideo())) {
+            stopPlayback();
         } else {
             waitMetadataSync(getVideo(), true);
         }
@@ -188,8 +183,7 @@ public class VideoLoaderController extends BasePlayerController {
         }
 
         if (getVideo() != null && getVideo().isLocalArchive) {
-            LocalArchivePlaybackManager.instance(getContext()).closeActive();
-            getPlayer().showOverlay(true);
+            applyPlaybackMode(getPlaybackMode());
             return;
         }
 
@@ -228,7 +222,7 @@ public class VideoLoaderController extends BasePlayerController {
             if (item.isLocalArchive) {
                 if (item.localStreamUrl == null ||
                         !LocalArchivePlaybackManager.instance(getContext()).isActiveFor(item.localStreamUrl)) {
-                    LocalArchivePlaybackManager.instance(getContext()).closeActive();
+                    LocalArchivePlaybackManager.instance(getContext()).closeAll();
                     getPlayer().showProgressBar(false);
                     getPlayer().setTitle("Local archive stream is unavailable");
                     return;
@@ -406,6 +400,12 @@ public class VideoLoaderController extends BasePlayerController {
         disposeActions();
 
         if (item.hasVideo()) {
+            if (item.isLocalArchive || item.isLocalArchiveOnly ||
+                    (item.belongsToUserPlaylists() && hasLocalPlaylistContext(item))) {
+                LocalArchivePlaybackManager.instance(getContext()).play(item,
+                        item.isLocalArchive || item.isLocalArchiveOnly);
+                return;
+            }
             // NOTE: Next clicked: instant playback even a mix
             // NOTE: Bypass PIP fullscreen on next caused by startView
             getMainController().onNewVideo(item);
@@ -413,6 +413,17 @@ public class VideoLoaderController extends BasePlayerController {
         } else {
             VideoActionPresenter.instance(getContext()).apply(item);
         }
+    }
+
+    private boolean hasLocalPlaylistContext(Video video) {
+        if (video == null) return false;
+        if (video.isLocalArchive || video.isLocalArchiveOnly) return true;
+        VideoGroup group = video.getGroup();
+        if (group == null) return false;
+        for (Video item : group.getVideos()) {
+            if (item.isLocalArchiveOnly) return true;
+        }
+        return false;
     }
 
     private boolean isActionsRunning() {
@@ -448,6 +459,28 @@ public class VideoLoaderController extends BasePlayerController {
             playbackMode = PlayerConstants.PLAYBACK_MODE_CLOSE;
         }
 
+        if (hasLocalPlaylistContext(video)) {
+            switch (playbackMode) {
+                case PlayerConstants.PLAYBACK_MODE_ONE:
+                    getPlayer().setPositionMs(0);
+                    return;
+                case PlayerConstants.PLAYBACK_MODE_CLOSE:
+                    getPlayer().finishReally();
+                    return;
+                case PlayerConstants.PLAYBACK_MODE_PAUSE:
+                    stopPlayback();
+                    return;
+                case PlayerConstants.PLAYBACK_MODE_LIST:
+                case PlayerConstants.PLAYBACK_MODE_ALL:
+                case PlayerConstants.PLAYBACK_MODE_SHUFFLE:
+                case PlayerConstants.PLAYBACK_MODE_REVERSE_LIST:
+                    loadNext();
+                    return;
+                default:
+                    break;
+            }
+        }
+
         switch (playbackMode) {
             case PlayerConstants.PLAYBACK_MODE_REVERSE_LIST:
                 if (video.hasPlaylist() || video.belongsToChannelUploads() || video.belongsToChannel()) {
@@ -472,7 +505,7 @@ public class VideoLoaderController extends BasePlayerController {
             case PlayerConstants.PLAYBACK_MODE_CLOSE:
                 // Close player if suggestions not shown
                 // Except when playing from queue
-                if (mPlaylist.getNext() != null && !getPlayerTweaksData().isQueueRespectsPlaybackMode()) {
+                if (!hasLocalPlaylistContext(video) && mPlaylist.getNext() != null && !getPlayerTweaksData().isQueueRespectsPlaybackMode()) {
                     loadNext();
                 } else {
                     AppDialogPresenter dialog = getAppDialogPresenter();
@@ -485,7 +518,7 @@ public class VideoLoaderController extends BasePlayerController {
             case PlayerConstants.PLAYBACK_MODE_PAUSE:
                 // Stop player after each video.
                 // Except when playing from queue
-                if (mPlaylist.getNext() != null && !getPlayerTweaksData().isQueueRespectsPlaybackMode()) {
+                if (!hasLocalPlaylistContext(video) && mPlaylist.getNext() != null && !getPlayerTweaksData().isQueueRespectsPlaybackMode()) {
                     loadNext();
                 } else {
                     stopPlayback();
@@ -493,7 +526,7 @@ public class VideoLoaderController extends BasePlayerController {
                 break;
             case PlayerConstants.PLAYBACK_MODE_LIST:
                 // if video has a playlist load next or restart playlist
-                if (video.hasNextPlaylist() || mPlaylist.getNext() != null) {
+                if (hasLocalPlaylistContext(video) || video.hasNextPlaylist() || mPlaylist.getNext() != null) {
                     loadNext();
                 } else {
                     //restartPlaylistIfNeeded();

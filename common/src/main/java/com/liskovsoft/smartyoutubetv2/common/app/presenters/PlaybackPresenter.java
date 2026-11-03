@@ -28,6 +28,7 @@ import com.liskovsoft.smartyoutubetv2.common.exoplayer.selector.FormatItem;
 import com.liskovsoft.smartyoutubetv2.common.utils.Utils;
 import com.liskovsoft.smartyoutubetv2.common.utils.Utils.ChainProcessor;
 import com.liskovsoft.smartyoutubetv2.common.utils.Utils.Processor;
+import com.liskovsoft.smartyoutubetv2.common.local.LocalArchivePlaybackManager;
 import com.liskovsoft.googlecommon.common.helpers.ServiceHelper;
 
 import java.lang.ref.WeakReference;
@@ -113,6 +114,13 @@ public class PlaybackPresenter extends BasePresenter<PlaybackView> implements Pl
         if (video == null) {
             return;
         }
+
+        LocalArchivePlaybackManager localPlayback = LocalArchivePlaybackManager.instance(getContext());
+        if ((video.isLocalArchive || video.isLocalArchiveOnly) && !localPlayback.isActiveFor(video.localStreamUrl)) {
+            localPlayback.play(video, true);
+            return;
+        }
+        localPlayback.onNewVideo(video);
 
         if (getView() != null && getView().isEmbed()) { // switching from the embed player to the fullscreen one
             // The embed player doesn't disposed properly

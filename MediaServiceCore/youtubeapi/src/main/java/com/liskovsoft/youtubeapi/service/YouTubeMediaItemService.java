@@ -364,7 +364,7 @@ public class YouTubeMediaItemService implements MediaItemService {
 
     private void addToPlaylist(String playlistId, MediaItem item) {
         PlaylistGroupServiceImpl.cachedItem = item;
-        getPlaylistService().addToPlaylist(playlistId, item.getVideoId());
+        getPlaylistService().addToPlaylist(playlistId, item);
     }
 
     @Override
@@ -404,7 +404,7 @@ public class YouTubeMediaItemService implements MediaItemService {
 
     private void createPlaylist(String playlistName, @Nullable MediaItem item) {
         PlaylistGroupServiceImpl.cachedItem = item;
-        getPlaylistService().createPlaylist(playlistName, item != null ? item.getVideoId() : null);
+        getPlaylistService().createPlaylist(playlistName, item);
     }
 
     @Override

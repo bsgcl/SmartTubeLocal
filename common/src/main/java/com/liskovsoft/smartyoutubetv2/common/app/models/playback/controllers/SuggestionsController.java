@@ -87,6 +87,20 @@ public class SuggestionsController extends BasePlayerController {
      */
     @Override
     public void onVideoLoaded(Video item) {
+        if (hasLocalPlaylistContext(item)) {
+            VideoGroup group = item.getGroup();
+            if (getPlayer() != null) {
+                getPlayer().clearSuggestions();
+                if (group != null && !group.isEmpty()) {
+                    getPlayer().updateSuggestions(group);
+                    getPlayer().showSuggestions(true);
+                    getPlayer().setNextTitle(getNext());
+                } else {
+                    getPlayer().showSuggestions(false);
+                }
+            }
+            return;
+        }
         if (item != null && item.isLocalArchive) {
             if (getPlayer() != null) {
                 getPlayer().clearSuggestions();
@@ -247,6 +261,7 @@ public class SuggestionsController extends BasePlayerController {
     }
 
     public void loadSuggestions(Video video) {
+        if (hasLocalPlaylistContext(video)) return;
         if (isEmbedPlayer()) {
             return;
         }
@@ -291,6 +306,10 @@ public class SuggestionsController extends BasePlayerController {
             return null;
         }
 
+        if (hasLocalPlaylistContext(getVideo())) {
+            return getLocalPlaylistNext(getVideo());
+        }
+
         Video result = null;
         Video next = Playlist.instance().getNext();
 
@@ -311,6 +330,10 @@ public class SuggestionsController extends BasePlayerController {
             return null;
         }
 
+        if (hasLocalPlaylistContext(getVideo())) {
+            return getLocalPlaylistPrevious(getVideo());
+        }
+
         Video result = getPreviousFromGroup(getVideo());
 
         if (result == null) {
@@ -322,6 +345,48 @@ public class SuggestionsController extends BasePlayerController {
             }
         }
 
+        return result;
+    }
+
+    private boolean hasLocalPlaylistContext(Video video) {
+        if (video == null) return false;
+        if (video.isLocalArchive || video.isLocalArchiveOnly) return true;
+        VideoGroup group = video.getGroup();
+        if (group == null) return false;
+        for (Video item : group.getVideos()) {
+            if (item.isLocalArchiveOnly) return true;
+        }
+        return false;
+    }
+
+    private Video getLocalPlaylistNext(Video current) {
+        VideoGroup group = current != null ? current.getGroup() : null;
+        if (group == null || group.isEmpty()) return null;
+        List<Video> entries = getPlayablePlaylistEntries(group);
+        int index = entries.indexOf(current);
+        if (index < 0 || entries.isEmpty()) return null;
+        int mode = getPlayerData().getPlaybackMode();
+        int next = com.liskovsoft.smartyoutubetv2.common.local.LocalArchivePlaylistNavigation.nextIndex(
+                entries.size(), index, mode, PlayerConstants.PLAYBACK_MODE_SHUFFLE,
+                PlayerConstants.PLAYBACK_MODE_LIST, PlayerConstants.PLAYBACK_MODE_REVERSE_LIST,
+                Utils::getRandomIndex);
+        return next >= 0 ? entries.get(next) : null;
+    }
+
+    private Video getLocalPlaylistPrevious(Video current) {
+        VideoGroup group = current != null ? current.getGroup() : null;
+        if (group == null || group.isEmpty()) return null;
+        List<Video> entries = getPlayablePlaylistEntries(group);
+        int index = entries.indexOf(current);
+        int previous = com.liskovsoft.smartyoutubetv2.common.local.LocalArchivePlaylistNavigation.previousIndex(entries.size(), index);
+        return previous >= 0 ? entries.get(previous) : null;
+    }
+
+    private List<Video> getPlayablePlaylistEntries(VideoGroup group) {
+        List<Video> result = new ArrayList<>();
+        for (Video item : group.getVideos()) {
+            if (item.hasVideo() && !item.isUpcoming) result.add(item);
+        }
         return result;
     }
 

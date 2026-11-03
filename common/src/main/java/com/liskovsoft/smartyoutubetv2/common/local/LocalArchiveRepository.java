@@ -171,6 +171,7 @@ public final class LocalArchiveRepository implements AppPrefs.ProfileChangeListe
                 String streamUrl = stream.start();
                 Video video = toVideo(item);
                 video.isLocalArchive = true;
+                video.isLocalArchiveOnly = true;
                 video.localStreamUrl = streamUrl;
                 LoopbackHttpStream finalStream = stream;
                 main.post(() -> callback.onSuccess(new PlaybackSource(video, finalStream)));
@@ -274,6 +275,7 @@ public final class LocalArchiveRepository implements AppPrefs.ProfileChangeListe
         video.author = item.channelName;
         video.secondTitle = item.channelName;
         video.isLocalArchive = true;
+        video.isLocalArchiveOnly = true;
         video.hasLocalArchiveCopy = item.isAvailable();
         video.localArchivePath = item.mediaPath;
         video.localArchiveLength = item.mediaLength;

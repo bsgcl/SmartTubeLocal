@@ -79,6 +79,8 @@ public final class Video {
     public boolean isRemote;
     /** True only for entries opened through the local archive path. */
     public boolean isLocalArchive;
+    /** Persistent intent for archive-origin playlist entries; unlike isLocalArchive this has no live stream. */
+    public boolean isLocalArchiveOnly;
     /** True when a permission-checked local copy is available for this video id. */
     public boolean hasLocalArchiveCopy;
     public String localArchivePath;
@@ -153,7 +155,11 @@ public final class Video {
         video.author = item.getAuthor();
         video.percentWatched = item.getPercentWatched();
         video.startTimeSeconds = item.getStartTimeSeconds();
-        video.badge = item.getBadgeText();
+        video.isLocalArchiveOnly = com.liskovsoft.smartyoutubetv2.common.local.LocalArchivePlaylistMarker.isMarked(item.getBadgeText());
+        video.badge = com.liskovsoft.smartyoutubetv2.common.local.LocalArchivePlaylistMarker.visibleBadge(item.getBadgeText());
+        if (video.isLocalArchiveOnly && video.author == null && item.getSecondTitle() != null) {
+            video.author = item.getSecondTitle().toString();
+        }
         video.hasNewContent = item.hasNewContent();
         video.previewUrl = item.getVideoPreviewUrl();
         video.playlistId = item.getPlaylistId();
@@ -199,6 +205,7 @@ public final class Video {
         video.mediaItem = item.mediaItem;
         video.group = item.group;
         video.isLocalArchive = item.isLocalArchive;
+        video.isLocalArchiveOnly = item.isLocalArchiveOnly;
         video.hasLocalArchiveCopy = item.hasLocalArchiveCopy;
         video.localArchivePath = item.localArchivePath;
         video.localStreamUrl = item.localStreamUrl;

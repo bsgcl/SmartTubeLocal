@@ -39,6 +39,17 @@ public class PlaylistServiceWrapper extends PlaylistService {
         createCachedPlaylist(playlistName, videoId);
     }
 
+    @Override
+    public void createPlaylist(String playlistName, MediaItem item) {
+        if (item == null) {
+            createCachedPlaylist(playlistName, (String) null);
+            return;
+        }
+        ItemGroup playlist = PlaylistGroupServiceImpl.createPlaylistGroup(playlistName, item.getCardImageUrl(),
+                Collections.singletonList(ItemImpl.fromMediaItem(item)));
+        PlaylistGroupServiceImpl.addPlaylistGroup(playlist);
+    }
+
     private static void createCachedPlaylist(String playlistName, @Nullable String videoId) {
         MediaItem cachedVideo = PlaylistGroupServiceImpl.cachedItem;
 
@@ -125,6 +136,22 @@ public class PlaylistServiceWrapper extends PlaylistService {
     @Override
     public void addToPlaylist(String playlistId, String videoId) {
         addToCachedPlaylist(playlistId, videoId);
+    }
+
+    @Override
+    public void addToPlaylist(String playlistId, MediaItem item) {
+        if (item == null || item.getVideoId() == null) return;
+        ItemGroup playlistGroup = PlaylistGroupServiceImpl.findPlaylistGroup(playlistId);
+        if (playlistGroup == null) {
+            String title = findCashedTitle(playlistId);
+            if (title == null) return;
+            playlistGroup = PlaylistGroupServiceImpl.findPlaylistGroupByTitle(title);
+            if (playlistGroup == null) {
+                playlistGroup = PlaylistGroupServiceImpl.createPlaylistGroup(playlistId, title, (String) null);
+            }
+        }
+        playlistGroup.add(ItemImpl.fromMediaItem(item));
+        PlaylistGroupServiceImpl.addPlaylistGroup(playlistGroup);
     }
 
     private void addToCachedPlaylist(String playlistId, String videoId) {

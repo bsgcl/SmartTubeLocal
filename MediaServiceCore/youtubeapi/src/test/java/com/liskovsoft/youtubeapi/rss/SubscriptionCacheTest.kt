@@ -5,33 +5,53 @@ import com.liskovsoft.mediaserviceinterfaces.data.MediaItem
 import com.liskovsoft.youtubeapi.channelgroups.ChannelGroupServiceImpl
 import com.liskovsoft.youtubeapi.service.data.YouTubeMediaItem
 import com.liskovsoft.youtubeapi.service.internal.LocalProfileManager
+import com.liskovsoft.sharedutils.prefs.GlobalPreferences
+import io.reactivex.android.plugins.RxAndroidPlugins
+import io.reactivex.schedulers.Schedulers
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.robolectric.RuntimeEnvironment
 import org.robolectric.RobolectricTestRunner
+import java.util.concurrent.atomic.AtomicInteger
 
 @RunWith(RobolectricTestRunner::class)
 class SubscriptionCacheTest {
+    @Before
+    fun setUp() {
+        GlobalPreferences.instance(RuntimeEnvironment.getApplication())
+        RxAndroidPlugins.setMainThreadSchedulerHandler { Schedulers.trampoline() }
+        RssService.resetForTests()
+    }
+
+    @After
+    fun tearDown() {
+        RssService.resetForTests()
+        RxAndroidPlugins.reset()
+    }
+
     @Test
     fun staleCacheEmitsImmediatelyAndRetainsLastGoodResultOnFailure() {
         withProfile("subscription-cache-stale") { channelId ->
             var now = 1_000_000L
-            var calls = 0
+            val calls = AtomicInteger()
             RssService.nowProvider = { now }
             RssService.feedLoader = {
-                calls++
-                listOf(video(channelId, "video-$calls", now))
+                val call = calls.incrementAndGet()
+                listOf(video(channelId, "video-$call", now))
             }
             subscribe(channelId)
 
             val first = collect()
-            assertEquals(1, calls)
+            assertEquals(1, calls.get())
             assertEquals(1, first.single().mediaItems?.size)
 
             RssService.reloadForTests()
             assertEquals(1, collect().size)
-            assertEquals(1, calls)
+            assertEquals(1, calls.get())
 
             now += 15 * 60 * 1_000L + 1
             val staleThenFresh = collect()
@@ -40,9 +60,12 @@ class SubscriptionCacheTest {
             assertEquals("video-2", staleThenFresh.last().mediaItems?.first()?.videoId)
 
             now += 15 * 60 * 1_000L + 1
-            RssService.feedLoader = { null }
+            RssService.feedLoader = {
+                calls.incrementAndGet()
+                null
+            }
             val failedRefresh = collect()
-            assertEquals(3, calls)
+            assertEquals(3, calls.get())
             assertEquals(1, failedRefresh.size)
             assertEquals("video-2", failedRefresh.single().mediaItems?.first()?.videoId)
         }
@@ -52,21 +75,21 @@ class SubscriptionCacheTest {
     fun freshCacheAvoidsNetworkAndManualRefreshBypassesTtl() {
         withProfile("subscription-cache-force") { channelId ->
             var now = 2_000_000L
-            var calls = 0
+            val calls = AtomicInteger()
             RssService.nowProvider = { now }
             RssService.feedLoader = {
-                calls++
-                listOf(video(channelId, "video-$calls", now))
+                val call = calls.incrementAndGet()
+                listOf(video(channelId, "video-$call", now))
             }
             subscribe(channelId)
             collect()
 
             assertEquals(1, collect().size)
-            assertEquals(1, calls)
+            assertEquals(1, calls.get())
 
             RssService.requestSubscriptionRefresh()
             val forced = collect()
-            assertEquals(2, calls)
+            assertEquals(2, calls.get())
             assertEquals(2, forced.size)
             assertEquals("video-2", forced.last().mediaItems?.first()?.videoId)
         }
@@ -76,16 +99,17 @@ class SubscriptionCacheTest {
     fun moreThan100ChannelsRemainEligibleAndMergedFeedIsCappedAndDeduplicated() {
         withProfile("subscription-cache-cap") { firstChannel ->
             val channels = (0..100).map { if (it == 0) firstChannel else "channel-$it" }
+            subscribe(firstChannel)
             channels.drop(1).forEach { ChannelGroupServiceImpl.subscribe(true, it, "Title $it", "icon-$it") }
-            var calls = 0
+            val calls = AtomicInteger()
             RssService.feedLoader = { channelId ->
-                calls++
+                val call = calls.incrementAndGet()
                 if (channelId == firstChannel) {
                     (0..300).map { video(channelId, if (it == 300) "video-0" else "video-$it", it.toLong()) }
-                } else listOf(video(channelId, "single-$channelId", calls.toLong()))
+                } else listOf(video(channelId, "single-$channelId", call.toLong()))
             }
             val result = collect().single()
-            assertEquals(101, calls)
+            assertEquals(101, calls.get())
             assertEquals(300, result.mediaItems?.size)
             assertEquals(300, result.mediaItems?.mapNotNull { it.videoId }?.distinct()?.size)
             assertTrue(result.mediaItems?.first()?.publishedDate ?: 0L >= result.mediaItems?.last()?.publishedDate ?: 0L)

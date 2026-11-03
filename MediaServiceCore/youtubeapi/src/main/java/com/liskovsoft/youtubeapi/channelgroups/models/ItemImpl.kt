@@ -94,7 +94,8 @@ internal data class ItemImpl(
 
         @JvmStatic
         fun fromMediaItem(mediaItem: MediaItem): Item {
-            return ItemImpl(mediaItem.channelId, mediaItem.title, mediaItem.cardImageUrl, mediaItem.videoId, mediaItem.secondTitle, mediaItem.badgeText)
+            val subtitle = mediaItem.secondTitle ?: mediaItem.author
+            return ItemImpl(mediaItem.channelId, mediaItem.title, mediaItem.cardImageUrl, mediaItem.videoId, subtitle, mediaItem.badgeText)
         }
     }
 }

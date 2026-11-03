@@ -691,7 +691,7 @@ public class VideoMenuPresenter extends BaseMenuPresenter {
             return;
         }
 
-        if (mVideo.isLocalArchive) {
+        if (mVideo.isLocalArchive || mVideo.isLocalArchiveOnly) {
             String localId = LocalArchiveChannelIdentity.fromCanonicalId(mVideo.channelId);
             if (localId == null || LocalArchiveChannelIdentity.displayTitle(mVideo.author) == null) return;
             boolean subscribed = ChannelGroupServiceWrapper.instance(getContext()).isSubscribed(localId);
@@ -931,7 +931,7 @@ public class VideoMenuPresenter extends BaseMenuPresenter {
             return;
         }
 
-        if (mVideo.isLocalArchive) {
+        if (mVideo.isLocalArchive || mVideo.isLocalArchiveOnly) {
             toggleLocalSubscribe(mVideo);
             return;
         }

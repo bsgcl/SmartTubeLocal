@@ -34,8 +34,8 @@ public class VideoActionPresenter extends BasePresenter<Void> {
             return;
         }
 
-        if (item.isLocalArchive || item.hasLocalArchiveCopy) {
-            LocalArchivePlaybackManager.instance(getContext()).play(item);
+        if (item.isLocalArchive || item.isLocalArchiveOnly || item.hasLocalArchiveCopy || item.belongsToUserPlaylists()) {
+            LocalArchivePlaybackManager.instance(getContext()).play(item, item.isLocalArchive || item.isLocalArchiveOnly);
             return;
         }
 

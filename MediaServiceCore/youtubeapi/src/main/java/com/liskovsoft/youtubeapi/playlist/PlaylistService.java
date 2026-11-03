@@ -1,6 +1,7 @@
 package com.liskovsoft.youtubeapi.playlist;
 
 import com.liskovsoft.mediaserviceinterfaces.data.PlaylistInfo;
+import com.liskovsoft.mediaserviceinterfaces.data.MediaItem;
 import com.liskovsoft.youtubeapi.actions.models.ActionResult;
 import com.liskovsoft.googlecommon.common.helpers.RetrofitHelper;
 import com.liskovsoft.youtubeapi.playlist.impl.YouTubePlaylistInfo;
@@ -29,6 +30,10 @@ public class PlaylistService {
                 mPlaylistManager.editPlaylist(PlaylistApiHelper.getAddToPlaylistQuery(playlistId, videoId));
 
         RetrofitHelper.get(wrapper); // ignore result
+    }
+
+    public void addToPlaylist(String playlistId, MediaItem item) {
+        if (item != null) addToPlaylist(playlistId, item.getVideoId());
     }
 
     public void removeFromPlaylist(String playlistId, String videoId) {
@@ -90,5 +95,9 @@ public class PlaylistService {
                 mPlaylistManager.createPlaylist(PlaylistApiHelper.getCreatePlaylistQuery(playlistName, videoId));
 
         RetrofitHelper.getWithErrors(wrapper); // ignore result
+    }
+
+    public void createPlaylist(String playlistName, MediaItem item) {
+        createPlaylist(playlistName, item != null ? item.getVideoId() : null);
     }
 }

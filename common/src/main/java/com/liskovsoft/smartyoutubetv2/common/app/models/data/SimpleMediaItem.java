@@ -63,7 +63,8 @@ public final class SimpleMediaItem implements MediaItem {
         mediaItem.mAuthor = video.author;
         mediaItem.mPercentWatched = (int) video.percentWatched;
         mediaItem.mStartTimeSeconds = video.startTimeSeconds;
-        mediaItem.mBadgeText = video.badge;
+        mediaItem.mBadgeText = video.isLocalArchive || video.isLocalArchiveOnly ?
+                com.liskovsoft.smartyoutubetv2.common.local.LocalArchivePlaylistMarker.encode(video.badge) : video.badge;
         mediaItem.mHaseNewContent = video.hasNewContent;
         mediaItem.mVideoPreviewUrl = video.previewUrl;
         mediaItem.mPlaylistId = video.playlistId;

@@ -2,15 +2,23 @@ package com.liskovsoft.youtubeapi.channelgroups
 
 import com.liskovsoft.youtubeapi.service.internal.LocalProfileManager
 import com.liskovsoft.youtubeapi.browse.v2.BrowseService2Wrapper
+import com.liskovsoft.sharedutils.prefs.GlobalPreferences
+import org.junit.Before
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.robolectric.RuntimeEnvironment
 import org.robolectric.RobolectricTestRunner
 
 @RunWith(RobolectricTestRunner::class)
 class ChannelGroupServiceImplTest {
+    @Before
+    fun setUp() {
+        GlobalPreferences.instance(RuntimeEnvironment.getApplication())
+    }
+
     @Test
     fun firstSubscriptionPersistsWithMetadataUnavailable() {
         val profiles = LocalProfileManager.instance()

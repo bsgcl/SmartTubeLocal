@@ -446,20 +446,8 @@ public class BrowsePresenter extends BasePresenter<BrowseView> implements Sectio
         }
 
         if (item.isLocalArchive || item.hasLocalArchiveCopy) {
-            LocalArchiveRepository.instance(getContext()).startPlayback(item.videoId,
-                    new LocalArchiveRepository.Callback<LocalArchiveRepository.PlaybackSource>() {
-                        @Override
-                        public void onSuccess(LocalArchiveRepository.PlaybackSource source) {
-                            com.liskovsoft.smartyoutubetv2.common.local.LocalArchivePlaybackManager
-                                    .instance(getContext()).activate(source.stream);
-                            PlaybackPresenter.instance(getContext()).openVideo(source.video);
-                        }
-
-                        @Override
-                        public void onError(String message) {
-                            MessageHelpers.showMessage(getContext(), message);
-                        }
-                    });
+            com.liskovsoft.smartyoutubetv2.common.local.LocalArchivePlaybackManager
+                    .instance(getContext()).play(item, item.isLocalArchive || item.isLocalArchiveOnly);
             return;
         }
 
