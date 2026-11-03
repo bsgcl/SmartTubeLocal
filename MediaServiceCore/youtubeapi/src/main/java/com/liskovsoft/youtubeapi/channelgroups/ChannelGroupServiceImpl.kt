@@ -220,11 +220,17 @@ internal object ChannelGroupServiceImpl: MediaServicePrefs.ProfileChangeListener
         persistDataNow()
     }
 
+    override fun subscribeChannel(subscribe: Boolean, channelId: String, title: String?, iconUrl: String?) {
+        subscribe(subscribe, channelId, title, iconUrl)
+    }
+
     fun isSubscribed(channelId: String): Boolean {
         val group: ItemGroup? = findChannelGroupById(SUBSCRIPTIONS_GROUP_ID)
 
         return group?.contains(channelId) ?: false
     }
+
+    override fun isChannelSubscribed(channelId: String): Boolean = isSubscribed(channelId)
 
     private fun restoreData() {
         val data = MediaServicePrefs.getProfileData(CHANNEL_GROUP_DATA)

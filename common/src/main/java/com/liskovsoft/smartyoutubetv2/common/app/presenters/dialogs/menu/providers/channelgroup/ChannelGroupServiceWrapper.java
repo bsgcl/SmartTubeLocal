@@ -84,6 +84,14 @@ public class ChannelGroupServiceWrapper implements ProfileChangeListener {
         return getService().isEmpty();
     }
 
+    public void subscribe(boolean subscribe, String channelId, String title, String iconUrl) {
+        getService().subscribeChannel(subscribe, channelId, title, iconUrl);
+    }
+
+    public boolean isSubscribed(String channelId) {
+        return getService().isChannelSubscribed(channelId);
+    }
+
     private void restoreState() {
         String data = mPrefs.getChannelGroupData();
         if (data != null) {

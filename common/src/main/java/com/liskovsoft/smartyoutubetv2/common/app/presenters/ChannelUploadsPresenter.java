@@ -26,6 +26,9 @@ import com.liskovsoft.smartyoutubetv2.common.misc.MediaServiceManager;
 import com.liskovsoft.smartyoutubetv2.common.misc.MediaServiceManager.OnComplete;
 import com.liskovsoft.smartyoutubetv2.common.misc.MediaServiceManager.OnError;
 import com.liskovsoft.smartyoutubetv2.common.misc.MediaServiceManager.OnMediaGroup;
+import com.liskovsoft.smartyoutubetv2.common.local.LocalArchiveChannelIdentity;
+import com.liskovsoft.smartyoutubetv2.common.local.LocalArchiveRepository;
+import com.liskovsoft.youtubeapi.service.data.YouTubeMediaGroup;
 
 import io.reactivex.Observable;
 import io.reactivex.disposables.Disposable;
@@ -99,6 +102,11 @@ public class ChannelUploadsPresenter extends BasePresenter<ChannelUploadsView> i
             if (action == VideoMenuCallback.ACTION_REMOVE_FROM_PLAYLIST) {
                 removeItem(videoItem);
             } else if (action == VideoMenuCallback.ACTION_UNSUBSCRIBE) {
+                if (LocalArchiveChannelIdentity.isLocalId(videoItem.channelId)) {
+                    getViewManager().startView(com.liskovsoft.smartyoutubetv2.common.app.views.BrowseView.class);
+                    BrowsePresenter.instance(getContext()).refresh(false);
+                    return;
+                }
                 MessageHelpers.showMessage(getContext(), R.string.unsubscribed_from_channel);
             }
         });
@@ -134,7 +142,8 @@ public class ChannelUploadsPresenter extends BasePresenter<ChannelUploadsView> i
 
     public void openChannel(Video item) {
         // Working with uploads or playlists
-        if (item == null || (!item.hasNestedItems() && !item.hasPlaylist())) {
+        if (item == null || (!item.hasNestedItems() && !item.hasPlaylist() &&
+                !LocalArchiveChannelIdentity.isLocalId(item.channelId))) {
             return;
         }
 
@@ -168,6 +177,27 @@ public class ChannelUploadsPresenter extends BasePresenter<ChannelUploadsView> i
             item.mediaItem = SimpleMediaItem.from(item);
         }
 
+        if (LocalArchiveChannelIdentity.isLocalId(item.channelId)) {
+            String canonicalId = LocalArchiveChannelIdentity.canonicalId(item.channelId);
+            String title = item.title;
+            return Observable.create(emitter -> LocalArchiveRepository.instance(getContext()).loadChannelVideos(
+                    canonicalId, new LocalArchiveRepository.Callback<List<Video>>() {
+                        @Override public void onSuccess(List<Video> videos) {
+                            if (emitter.isDisposed()) return;
+                            YouTubeMediaGroup group = new YouTubeMediaGroup(0);
+                            group.setTitle(title);
+                            java.util.ArrayList<MediaItem> mediaItems = new java.util.ArrayList<>();
+                            for (Video video : videos) mediaItems.add(SimpleMediaItem.from(video));
+                            group.setMediaItems(mediaItems);
+                            emitter.onNext(group);
+                            emitter.onComplete();
+                        }
+                        @Override public void onError(String message) {
+                            if (!emitter.isDisposed()) emitter.onError(new IllegalStateException(message));
+                        }
+                    }));
+        }
+
         disposeActions();
 
         return item.hasNestedItems() || item.isChannel() ?
@@ -193,6 +223,7 @@ public class ChannelUploadsPresenter extends BasePresenter<ChannelUploadsView> i
     }
 
     private void continueGroup(VideoGroup group) {
+        if (mChannel != null && LocalArchiveChannelIdentity.isLocalId(mChannel.channelId)) return;
         disposeActions();
 
         if (getView() == null) {

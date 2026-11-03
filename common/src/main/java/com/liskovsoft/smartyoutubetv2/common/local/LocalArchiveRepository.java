@@ -132,6 +132,24 @@ public final class LocalArchiveRepository implements AppPrefs.ProfileChangeListe
         });
     }
 
+    /** Return only indexed archive entries whose canonical channel ID matches exactly. */
+    public void loadChannelVideos(String channelId, Callback<List<Video>> callback) {
+        if (TextUtils.isEmpty(channelId) || !settings.isLibraryEnabledForActiveProfile()) {
+            main.post(() -> callback.onError("This profile does not have permission for the local archive"));
+            return;
+        }
+        scanAsync(new Callback<List<Video>>() {
+            @Override public void onSuccess(List<Video> videos) {
+                List<Video> matches = new ArrayList<>();
+                for (Video video : videos) {
+                    if (channelId.equals(video.channelId)) matches.add(video);
+                }
+                callback.onSuccess(matches);
+            }
+            @Override public void onError(String message) { callback.onError(message); }
+        });
+    }
+
     public void startPlayback(String videoId, Callback<PlaybackSource> callback) {
         io.execute(() -> {
             LoopbackHttpStream stream = null;

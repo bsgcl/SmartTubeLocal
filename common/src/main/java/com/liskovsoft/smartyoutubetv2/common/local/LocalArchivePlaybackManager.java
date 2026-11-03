@@ -5,6 +5,7 @@ import android.content.Context;
 import com.liskovsoft.smartyoutubetv2.common.app.models.data.Video;
 import com.liskovsoft.smartyoutubetv2.common.app.presenters.PlaybackPresenter;
 import com.liskovsoft.smartyoutubetv2.common.prefs.AppPrefs;
+import com.liskovsoft.sharedutils.helpers.MessageHelpers;
 
 /** Owns the one active local SMB stream and closes it on player/profile transitions. */
 public final class LocalArchivePlaybackManager implements AppPrefs.ProfileChangeListener {
@@ -36,6 +37,20 @@ public final class LocalArchivePlaybackManager implements AppPrefs.ProfileChange
 
     public synchronized boolean isActiveFor(String streamUrl) {
         return active != null && streamUrl != null && streamUrl.equals(active.url());
+    }
+
+    public void play(Video video) {
+        if (video == null) return;
+        LocalArchiveRepository.instance(context).startPlayback(video.videoId,
+                new LocalArchiveRepository.Callback<LocalArchiveRepository.PlaybackSource>() {
+                    @Override public void onSuccess(LocalArchiveRepository.PlaybackSource source) {
+                        activate(source.stream);
+                        PlaybackPresenter.instance(context).openVideo(source.video);
+                    }
+                    @Override public void onError(String message) {
+                        MessageHelpers.showMessage(context, message);
+                    }
+                });
     }
 
     @Override

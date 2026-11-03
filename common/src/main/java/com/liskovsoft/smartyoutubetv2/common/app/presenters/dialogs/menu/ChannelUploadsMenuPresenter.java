@@ -15,6 +15,8 @@ import com.liskovsoft.smartyoutubetv2.common.app.presenters.ChannelPresenter;
 import com.liskovsoft.smartyoutubetv2.common.app.presenters.ChannelUploadsPresenter;
 import com.liskovsoft.smartyoutubetv2.common.app.presenters.dialogs.menu.VideoMenuPresenter.VideoMenuCallback;
 import com.liskovsoft.smartyoutubetv2.common.misc.MediaServiceManager;
+import com.liskovsoft.smartyoutubetv2.common.local.LocalArchiveChannelIdentity;
+import com.liskovsoft.smartyoutubetv2.common.app.presenters.dialogs.menu.providers.channelgroup.ChannelGroupServiceWrapper;
 import com.liskovsoft.youtubeapi.service.YouTubeServiceManager;
 import io.reactivex.disposables.Disposable;
 
@@ -75,9 +77,10 @@ public class ChannelUploadsMenuPresenter extends BaseMenuPresenter {
     private void prepareAndShowDialog() {
         // Doesn't need this since this is the main action.
         //appendOpenChannelUploadsButton();
-        appendOpenChannelButton();
+        boolean local = LocalArchiveChannelIdentity.isLocalId(mVideo.channelId);
+        if (!local) appendOpenChannelButton();
         appendUnsubscribeButton();
-        appendMarkAsWatched();
+        if (!local) appendMarkAsWatched();
         appendTogglePinVideoToSidebarButton();
 
         mDialogPresenter.showDialog(mVideo.getTitle());
@@ -108,6 +111,14 @@ public class ChannelUploadsMenuPresenter extends BaseMenuPresenter {
 
         mDialogPresenter.appendSingleButton(
                 UiOptionItem.from(getContext().getString(R.string.unsubscribe_from_channel), optionItem -> {
+                    if (LocalArchiveChannelIdentity.isLocalId(mVideo.channelId)) {
+                        ChannelGroupServiceWrapper.instance(getContext()).subscribe(false, mVideo.channelId, null, null);
+                        if (mCallback != null) {
+                            mDialogPresenter.closeDialog();
+                            mCallback.onItemAction(mVideo, VideoMenuCallback.ACTION_UNSUBSCRIBE);
+                        }
+                        return;
+                    }
                     // Maybe this is subscribed items view
                     ChannelUploadsPresenter.instance(getContext())
                             .obtainGroup(mVideo, group -> {

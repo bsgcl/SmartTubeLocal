@@ -44,6 +44,7 @@ import com.liskovsoft.smartyoutubetv2.common.misc.MediaServiceManager;
 import com.liskovsoft.smartyoutubetv2.common.misc.MediaServiceManager.AccountChangeListener;
 import com.liskovsoft.smartyoutubetv2.common.local.LocalArchiveConstants;
 import com.liskovsoft.smartyoutubetv2.common.local.LocalArchiveChannelRows;
+import com.liskovsoft.smartyoutubetv2.common.local.LocalArchiveChannelIdentity;
 import com.liskovsoft.smartyoutubetv2.common.local.LocalArchiveRepository;
 import com.liskovsoft.smartyoutubetv2.common.local.LocalArchiveSettings;
 import com.liskovsoft.smartyoutubetv2.common.prefs.AccountsData;
@@ -484,6 +485,7 @@ public class BrowsePresenter extends BasePresenter<BrowseView> implements Sectio
             ChannelUploadsMenuPresenter.instance(getContext()).showMenu(item, (videoItem, action) -> {
                 if (action == VideoMenuCallback.ACTION_UNSUBSCRIBE) { // works with any uploads section look
                     removeItem(item);
+                    if (LocalArchiveChannelIdentity.isLocalId(item.channelId)) refresh(false);
                 }
             });
         } else {

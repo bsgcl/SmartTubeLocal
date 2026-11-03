@@ -23,6 +23,8 @@ import com.liskovsoft.smartyoutubetv2.common.app.presenters.BrowsePresenter;
 import com.liskovsoft.smartyoutubetv2.common.app.presenters.ChannelPresenter;
 import com.liskovsoft.smartyoutubetv2.common.app.presenters.ChannelUploadsPresenter;
 import com.liskovsoft.smartyoutubetv2.common.app.presenters.PlaybackPresenter;
+import com.liskovsoft.smartyoutubetv2.common.local.LocalArchiveChannelIdentity;
+import com.liskovsoft.smartyoutubetv2.common.app.presenters.dialogs.menu.providers.channelgroup.ChannelGroupServiceWrapper;
 import com.liskovsoft.smartyoutubetv2.common.app.presenters.dialogs.menu.providers.ContextMenuManager;
 import com.liskovsoft.smartyoutubetv2.common.app.presenters.dialogs.menu.providers.ContextMenuProvider;
 import com.liskovsoft.smartyoutubetv2.common.app.views.ChannelUploadsView;
@@ -689,6 +691,16 @@ public class VideoMenuPresenter extends BaseMenuPresenter {
             return;
         }
 
+        if (mVideo.isLocalArchive) {
+            String localId = LocalArchiveChannelIdentity.fromCanonicalId(mVideo.channelId);
+            if (localId == null || LocalArchiveChannelIdentity.displayTitle(mVideo.author) == null) return;
+            boolean subscribed = ChannelGroupServiceWrapper.instance(getContext()).isSubscribed(localId);
+            mDialogPresenter.appendSingleButton(UiOptionItem.from(
+                    subscribed ? "Unsubscribe from local channel" : "Subscribe to local channel",
+                    optionItem -> toggleSubscribe()));
+            return;
+        }
+
         mVideo.isSubscribed = mVideo.isSubscribed || mVideo.belongsToSubscriptions() || mVideo.belongsToChannelUploads();
 
         mDialogPresenter.appendSingleButton(
@@ -919,6 +931,11 @@ public class VideoMenuPresenter extends BaseMenuPresenter {
             return;
         }
 
+        if (mVideo.isLocalArchive) {
+            toggleLocalSubscribe(mVideo);
+            return;
+        }
+
         //mVideo.isSynced = true; // default to subscribe
 
         // Until synced we won't really know weather we subscribed to a channel.
@@ -934,6 +951,20 @@ public class VideoMenuPresenter extends BaseMenuPresenter {
                 toggleSubscribe(mVideo);
             });
         }
+    }
+
+    private void toggleLocalSubscribe(Video video) {
+        String localId = LocalArchiveChannelIdentity.fromCanonicalId(video.channelId);
+        String title = LocalArchiveChannelIdentity.displayTitle(video.author);
+        if (localId == null || title == null) return;
+        boolean subscribed = ChannelGroupServiceWrapper.instance(getContext()).isSubscribed(localId);
+        ChannelGroupServiceWrapper.instance(getContext()).subscribe(!subscribed, localId, title, video.cardImageUrl);
+        video.isSubscribed = !subscribed;
+        if (mCallback != null) {
+            mCallback.onItemAction(video, subscribed ? VideoMenuCallback.ACTION_UNSUBSCRIBE : VideoMenuCallback.ACTION_SUBSCRIBE);
+        }
+        MessageHelpers.showMessage(getContext(), subscribed ? "Unsubscribed from local channel" : "Subscribed to local channel");
+        mDialogPresenter.closeDialog();
     }
 
     private void toggleSubscribe(Video video) {

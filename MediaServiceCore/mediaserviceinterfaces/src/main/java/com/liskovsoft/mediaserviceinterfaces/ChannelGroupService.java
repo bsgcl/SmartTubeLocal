@@ -23,4 +23,6 @@ public interface ChannelGroupService {
     Observable<List<ItemGroup>> importGroupsObserve(File file);
     void exportData(String data);
     boolean isEmpty();
+    void subscribeChannel(boolean subscribe, String channelId, String title, String iconUrl);
+    boolean isChannelSubscribed(String channelId);
 }

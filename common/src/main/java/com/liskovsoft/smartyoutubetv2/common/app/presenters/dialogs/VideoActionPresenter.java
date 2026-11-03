@@ -10,6 +10,8 @@ import com.liskovsoft.smartyoutubetv2.common.app.presenters.SearchPresenter;
 import com.liskovsoft.smartyoutubetv2.common.app.presenters.base.BasePresenter;
 import com.liskovsoft.smartyoutubetv2.common.misc.MediaServiceManager;
 import com.liskovsoft.smartyoutubetv2.common.utils.LoadingManager;
+import com.liskovsoft.smartyoutubetv2.common.local.LocalArchiveChannelIdentity;
+import com.liskovsoft.smartyoutubetv2.common.local.LocalArchivePlaybackManager;
 
 public class VideoActionPresenter extends BasePresenter<Void> {
     private static final String TAG = VideoActionPresenter.class.getSimpleName();
@@ -24,6 +26,16 @@ public class VideoActionPresenter extends BasePresenter<Void> {
 
     public void apply(Video item) {
         if (item == null) {
+            return;
+        }
+
+        if (LocalArchiveChannelIdentity.isLocalId(item.channelId)) {
+            ChannelUploadsPresenter.instance(getContext()).openChannel(item);
+            return;
+        }
+
+        if (item.isLocalArchive || item.hasLocalArchiveCopy) {
+            LocalArchivePlaybackManager.instance(getContext()).play(item);
             return;
         }
 

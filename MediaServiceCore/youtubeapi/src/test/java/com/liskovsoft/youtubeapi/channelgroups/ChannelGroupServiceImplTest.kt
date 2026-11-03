@@ -83,4 +83,34 @@ class ChannelGroupServiceImplTest {
             profiles.delete(profileA.id)
         }
     }
+
+    @Test
+    fun localAndOnlineSubscriptionsToSameChannelAreIndependent() {
+        val profiles = LocalProfileManager.instance()
+        val original = profiles.getActiveId()
+        val profile = profiles.create("local-online-subscription-test")
+        val canonical = "UCkhanacademy"
+        val local = "local-archive-channel:$canonical"
+        try {
+            profiles.select(profile.id)
+            ChannelGroupServiceImpl.subscribe(false, canonical, null, null)
+            ChannelGroupServiceImpl.subscribe(false, local, null, null)
+
+            ChannelGroupServiceImpl.subscribe(true, canonical, "Khan Academy", "online-icon")
+            ChannelGroupServiceImpl.subscribe(true, local, "[LOCAL] Khan Academy", "archive-icon")
+
+            val saved = ChannelGroupServiceImpl.getSubscribedChannelGroup().items
+            assertEquals("Khan Academy", saved.first { it.channelId == canonical }.title)
+            assertEquals("[LOCAL] Khan Academy", saved.first { it.channelId == local }.title)
+            assertTrue(ChannelGroupServiceImpl.isSubscribed(canonical))
+            assertTrue(ChannelGroupServiceImpl.isSubscribed(local))
+
+            ChannelGroupServiceImpl.subscribe(false, local, null, null)
+            assertFalse(ChannelGroupServiceImpl.isSubscribed(local))
+            assertTrue(ChannelGroupServiceImpl.isSubscribed(canonical))
+        } finally {
+            profiles.select(original)
+            profiles.delete(profile.id)
+        }
+    }
 }
