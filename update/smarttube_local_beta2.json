@@ -1,6 +1,15 @@
 {
   "package": {
-    "downloadUrl": "https://github.com/bsgcl/SmartTubeLocal/releases/download/v32.57-local/SmartTube_beta_32.57_universal.apk"
+    "downloadUrl": "https://github.com/bsgcl/SmartTubeLocal/releases/download/v32.61-local/SmartTube_beta_32.61_universal.apk"
+  },
+  "32.61": {
+    "versionCode": 2451,
+    "changelog": [
+      "Added local channel rows and subscriptions.",
+      "Added offline playlists.",
+      "Added offline Local Library shortcut.",
+      "Fixed missing SMB thumbnails."
+    ]
   },
   "32.57": {
     "versionCode": 2447,
