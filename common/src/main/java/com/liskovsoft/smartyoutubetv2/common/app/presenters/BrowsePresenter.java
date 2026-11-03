@@ -1297,6 +1297,10 @@ public class BrowsePresenter extends BasePresenter<BrowseView> implements Sectio
                 errorFragmentData = new SignInError(getContext());
             }
 
+            if (error != null &&
+                    com.liskovsoft.smartyoutubetv2.common.app.models.errors.YouTubeNetworkError.isYouTubeDnsFailure(error)) {
+                Log.e(TAG, "YouTube connection error: %s", Utils.getStackTraceAsString(error));
+            }
             getView().showError(errorFragmentData);
 
             if (Utils.fixRetrofitErrors(getContext(), error)) {

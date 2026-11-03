@@ -2,6 +2,8 @@
 <resources xmlns:tools="http://schemas.android.com/tools" tools:ignore="MissingTranslation">
     <string name="local_library">Local Library</string>
     <string name="local_library_settings">Local Library</string>
+    <string name="youtube_unavailable_offline">YouTube is unavailable.\nYour local videos and saved playlists are still available.</string>
+    <string name="open_local_library">Open Local Library</string>
     <string name="header_home">Home</string>
     <string name="title_search">Search</string>
     <string name="header_subscriptions">Subscriptions</string>
