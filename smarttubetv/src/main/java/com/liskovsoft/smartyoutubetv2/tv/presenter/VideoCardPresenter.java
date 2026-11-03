@@ -6,6 +6,7 @@ import android.graphics.Bitmap;
 import android.graphics.drawable.Drawable;
 import android.os.Build.VERSION;
 import android.util.Pair;
+import android.text.TextUtils;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.TextView;
@@ -21,6 +22,7 @@ import com.bumptech.glide.request.target.Target;
 import com.liskovsoft.sharedutils.helpers.Helpers;
 import com.liskovsoft.sharedutils.mylogger.Log;
 import com.liskovsoft.smartyoutubetv2.common.app.models.data.Video;
+import com.liskovsoft.smartyoutubetv2.common.local.LocalArchiveRepository;
 import com.liskovsoft.smartyoutubetv2.common.prefs.MainUIData;
 import com.liskovsoft.smartyoutubetv2.common.utils.ClickbaitRemover;
 import com.liskovsoft.smartyoutubetv2.tv.R;
@@ -150,6 +152,14 @@ public class VideoCardPresenter extends LongClickPresenter {
             return;
         }
 
+        if (video.isLocalArchive && !TextUtils.isEmpty(video.videoId)) {
+            String cachedArtwork = LocalArchiveRepository.instance(context).getCachedArtworkUrl(video.videoId);
+            video.cardImageUrl = cachedArtwork;
+            cardView.setTag(R.id.local_archive_thumbnail_request_tag, cachedArtwork == null ? video : null);
+        } else {
+            cardView.setTag(R.id.local_archive_thumbnail_request_tag, null);
+        }
+
         Glide.with(context)
                 //.asBitmap() // disable animation (webp, gif)
                 .load(ClickbaitRemover.updateThumbnail(video, mThumbQuality))
@@ -171,6 +181,26 @@ public class VideoCardPresenter extends LongClickPresenter {
                         .error(R.drawable.card_placeholder) // R.color.lb_grey
                 )
                 .into(cardView.getMainImageView());
+
+        if (video.isLocalArchive && video.cardImageUrl == null && !TextUtils.isEmpty(video.videoId)) {
+            LocalArchiveRepository.instance(context).loadArtwork(video.videoId,
+                    new LocalArchiveRepository.Callback<String>() {
+                        @Override public void onSuccess(String url) {
+                            video.cardImageUrl = url;
+                            if (cardView.getTag(R.id.local_archive_thumbnail_request_tag) != video) return;
+                            Context current = cardView.getContext();
+                            if (current instanceof Activity && ((Activity) current).isDestroyed()) return;
+                            Glide.with(current).load(url)
+                                    .apply(ViewUtil.glideOptions())
+                                    .override(mWidth, mHeight)
+                                    .error(R.drawable.card_placeholder)
+                                    .into(cardView.getMainImageView());
+                        }
+                        @Override public void onError(String message) {
+                            // The placeholder stays visible; the repository logs SMB read failures.
+                        }
+                    });
+        }
     }
 
     @Override
@@ -178,6 +208,7 @@ public class VideoCardPresenter extends LongClickPresenter {
         super.onUnbindViewHolder(viewHolder);
 
         ComplexImageCardView cardView = (ComplexImageCardView) viewHolder.view;
+        cardView.setTag(R.id.local_archive_thumbnail_request_tag, null);
 
         // Remove references to images so that the garbage collector can free up memory.
         cardView.setBadgeImage(null);

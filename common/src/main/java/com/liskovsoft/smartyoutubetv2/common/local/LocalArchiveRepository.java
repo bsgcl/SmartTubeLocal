@@ -9,16 +9,18 @@ import android.text.TextUtils;
 import com.liskovsoft.smartyoutubetv2.common.app.models.data.Video;
 import com.liskovsoft.smartyoutubetv2.common.app.presenters.BrowsePresenter;
 import com.liskovsoft.smartyoutubetv2.common.prefs.AppPrefs;
+import com.liskovsoft.sharedutils.mylogger.Log;
 
 import org.json.JSONException;
 
 import java.io.File;
-import java.io.FileOutputStream;
+import java.io.IOException;
 import java.nio.charset.Charset;
 import java.security.MessageDigest;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -27,6 +29,7 @@ import java.util.concurrent.Executors;
 
 /** Bounded scanner and playback factory for the configured router archive. */
 public final class LocalArchiveRepository implements AppPrefs.ProfileChangeListener {
+    private static final String TAG = LocalArchiveRepository.class.getSimpleName();
     private static final int MAX_DEPTH = 4;
     private static final int MAX_ENTRIES = 512;
     private static final int MAX_SIDECARS = 128;
@@ -66,6 +69,8 @@ public final class LocalArchiveRepository implements AppPrefs.ProfileChangeListe
     });
     private final Handler main = new Handler(Looper.getMainLooper());
     private volatile List<LocalArchiveItem> items = Collections.emptyList();
+    private final Map<String, List<Callback<String>>> artworkRequests = new HashMap<>();
+    private final Map<String, Long> artworkRetryAfter = new HashMap<>();
     private volatile boolean scanned;
 
     private LocalArchiveRepository(Context context) {
@@ -130,6 +135,95 @@ public final class LocalArchiveRepository implements AppPrefs.ProfileChangeListe
                 main.post(() -> callback.onError(userSafeError(e)));
             }
         });
+    }
+
+    /** Return a cached local image URL, or null if it is missing or access is denied. */
+    public String getCachedArtworkUrl(String videoId) {
+        if (TextUtils.isEmpty(videoId)) return null;
+        LocalArchiveItem item = findAccessibleItem(videoId);
+        if (item == null || item.artworkPath == null) return null;
+        File file = artworkFile(item);
+        return LocalArchiveArtworkCache.isUsable(file) ? Uri.fromFile(file).toString() : null;
+    }
+
+    /** Fetch a missing thumbnail from SMB without repeating the archive scan. */
+    public void loadArtwork(String videoId, Callback<String> callback) {
+        if (callback == null) return;
+        if (TextUtils.isEmpty(videoId) || !settings.isLibraryEnabledForActiveProfile()) {
+            main.post(() -> callback.onError("Local archive access denied"));
+            return;
+        }
+        LocalArchiveItem item = findAccessibleItem(videoId);
+        if (item == null || item.artworkPath == null) {
+            main.post(() -> callback.onError("Local thumbnail is unavailable"));
+            return;
+        }
+        String cached = getCachedArtworkUrl(videoId);
+        if (cached != null) {
+            main.post(() -> callback.onSuccess(cached));
+            return;
+        }
+
+        synchronized (artworkRequests) {
+            Long retryAfter = artworkRetryAfter.get(videoId);
+            if (retryAfter != null && System.currentTimeMillis() < retryAfter) {
+                main.post(() -> callback.onError("Local thumbnail retry pending"));
+                return;
+            }
+            List<Callback<String>> listeners = artworkRequests.get(videoId);
+            if (listeners != null) {
+                listeners.add(callback);
+                return;
+            }
+            listeners = new ArrayList<>();
+            listeners.add(callback);
+            artworkRequests.put(videoId, listeners);
+        }
+
+        io.execute(() -> {
+            String result = null;
+            SmbjArchiveClient client = null;
+            try {
+                if (!settings.isLibraryEnabledForActiveProfile() || findAccessibleItem(videoId) != item) {
+                    throw new IOException("Archive access changed");
+                }
+                LocalArchiveSettings.Config config = settings.getConfig();
+                client = newClient(config);
+                byte[] bytes = client.readSmallFile(
+                        sharePath(config.archiveFolder, item.artworkPath), MAX_ARTWORK_BYTES);
+                File output = artworkFile(item);
+                LocalArchiveArtworkCache.save(output, bytes, MAX_ARTWORK_BYTES);
+                result = Uri.fromFile(output).toString();
+            } catch (Exception error) {
+                Log.e(TAG, "Local thumbnail SMB fetch failed: %s", error.toString());
+            } finally {
+                if (client != null) client.close();
+            }
+
+            String url = result;
+            List<Callback<String>> listeners;
+            synchronized (artworkRequests) {
+                listeners = artworkRequests.remove(videoId);
+                if (url == null) artworkRetryAfter.put(videoId, System.currentTimeMillis() + 15_000);
+                else artworkRetryAfter.remove(videoId);
+            }
+            main.post(() -> {
+                for (Callback<String> listener : listeners) {
+                    if (!settings.isLibraryEnabledForActiveProfile()) {
+                        listener.onError("Local archive access denied");
+                    } else if (url != null) {
+                        listener.onSuccess(url);
+                    } else {
+                        listener.onError("Local thumbnail is unavailable");
+                    }
+                }
+            });
+        });
+    }
+
+    private File artworkFile(LocalArchiveItem item) {
+        return new File(new File(context.getCacheDir(), "local-archive-thumbnails"),
+                digest(item.videoId) + extension(item.artworkPath));
     }
 
     /** Return only indexed archive entries whose canonical channel ID matches exactly. */
@@ -248,15 +342,13 @@ public final class LocalArchiveRepository implements AppPrefs.ProfileChangeListe
             if (artworkCount >= MAX_ARTWORK_ITEMS || System.currentTimeMillis() >= deadline) break;
             if (item.artworkPath == null) continue;
             File output = new File(cacheDirectory, digest(item.videoId) + extension(item.artworkPath));
-            if (output.isFile() && output.length() > 0) continue;
+            if (LocalArchiveArtworkCache.isUsable(output)) continue;
             try {
                 artworkCount++;
                 byte[] bytes = client.readSmallFile(sharePath(archiveFolder, item.artworkPath), MAX_ARTWORK_BYTES);
-                try (FileOutputStream file = new FileOutputStream(output)) {
-                    file.write(bytes);
-                }
-            } catch (Exception ignored) {
-                // Artwork is optional; never substitute a remote thumbnail.
+                LocalArchiveArtworkCache.save(output, bytes, MAX_ARTWORK_BYTES);
+            } catch (Exception error) {
+                Log.e(TAG, "Local thumbnail scan copy failed: %s", error.toString());
             }
         }
     }
@@ -283,7 +375,7 @@ public final class LocalArchiveRepository implements AppPrefs.ProfileChangeListe
         if (item.artworkPath != null) {
             File artwork = new File(new File(context.getCacheDir(), "local-archive-thumbnails"),
                     digest(item.videoId) + extension(item.artworkPath));
-            if (artwork.isFile()) video.cardImageUrl = Uri.fromFile(artwork).toString();
+            if (LocalArchiveArtworkCache.isUsable(artwork)) video.cardImageUrl = Uri.fromFile(artwork).toString();
         }
         return video;
     }
