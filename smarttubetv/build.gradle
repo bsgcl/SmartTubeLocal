@@ -60,8 +60,8 @@ android {
         resValue 'string', 'search_suggest_intent_data', 'content://org.smarttube/video'
         minSdkVersion project.properties.minSdkVersion
         targetSdkVersion project.properties.targetSdkVersion
-        versionCode 2447
-        versionName "32.57"
+        versionCode 2448
+        versionName "32.58"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField "long", "TIMESTAMP", System.currentTimeMillis() + "L"
 
