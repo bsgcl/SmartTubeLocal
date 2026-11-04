@@ -1,6 +1,12 @@
 {
   "package": {
-    "downloadUrl": "https://github.com/bsgcl/SmartTubeLocal/releases/download/v32.61-local/SmartTube_beta_32.61_universal.apk"
+    "downloadUrl": "https://github.com/bsgcl/SmartTubeLocal/releases/download/v32.62-local/SmartTube_beta_32.62_universal.apk"
+  },
+  "32.62": {
+    "versionCode": 2452,
+    "changelog": [
+      "Repair missing online channel titles and icons without loss of subscriptions."
+    ]
   },
   "32.61": {
     "versionCode": 2451,
