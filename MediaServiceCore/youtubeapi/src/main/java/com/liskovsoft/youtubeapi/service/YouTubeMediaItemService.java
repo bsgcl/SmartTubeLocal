@@ -307,7 +307,12 @@ public class YouTubeMediaItemService implements MediaItemService {
 
     @Override
     public void subscribe(MediaItem item) {
-        subscribe(item.getChannelId(), item.getParams());
+        if (item == null || item.getChannelId() == null) return;
+        // A channel card carries its title and icon. A video card carries its author,
+        // but its thumbnail must never replace the channel icon.
+        String title = item.getVideoId() == null ? item.getTitle() : item.getAuthor();
+        String icon = item.getVideoId() == null ? item.getCardImageUrl() : null;
+        ChannelGroupServiceImpl.subscribe(true, item.getChannelId(), title, icon);
     }
 
     @Override

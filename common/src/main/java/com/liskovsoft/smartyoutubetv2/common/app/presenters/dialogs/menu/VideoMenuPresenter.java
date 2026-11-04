@@ -975,7 +975,9 @@ public class VideoMenuPresenter extends BaseMenuPresenter {
         RxHelper.disposeActions(mSubscribeAction);
 
         Observable<Void> observable = video.isSubscribed ?
-                mMediaItemService.unsubscribeObserve(video.channelId) : mMediaItemService.subscribeObserve(video.channelId);
+                mMediaItemService.unsubscribeObserve(video.channelId) :
+                mMediaItemService.subscribeObserve(
+                        com.liskovsoft.smartyoutubetv2.common.app.models.data.SimpleMediaItem.from(video));
 
         mSubscribeAction = RxHelper.execute(observable,
                 result -> {},

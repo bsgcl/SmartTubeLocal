@@ -121,4 +121,86 @@ class ChannelGroupServiceImplTest {
             profiles.delete(profile.id)
         }
     }
+
+    @Test
+    fun repeatedSubscriptionDoesNotEraseExistingChannelMetadata() {
+        val profiles = LocalProfileManager.instance()
+        val original = profiles.getActiveId()
+        val profile = profiles.create("metadata-preservation-test")
+        try {
+            profiles.select(profile.id)
+            ChannelGroupServiceImpl.cachedChannel = null
+            ChannelGroupServiceImpl.subscribe(true, "UCsailinguma", "Sailing Uma", "uma-icon")
+            ChannelGroupServiceImpl.subscribe(true, "UCsailinguma", null, null)
+            val saved = ChannelGroupServiceImpl.getSubscribedChannelGroup().items
+                .first { it.channelId == "UCsailinguma" }
+            assertEquals("Sailing Uma", saved.title)
+            assertEquals("uma-icon", saved.iconUrl)
+        } finally {
+            profiles.select(original)
+            profiles.delete(profile.id)
+        }
+    }
+
+    @Test
+    fun missingOnlineMetadataIsRepairedWithoutChangingLocalChannelsOrOrder() {
+        val profiles = LocalProfileManager.instance()
+        val original = profiles.getActiveId()
+        val profile = profiles.create("metadata-repair-test")
+        val onlineId = "UCsailinguma"
+        val localId = "local-archive-channel:$onlineId"
+        try {
+            profiles.select(profile.id)
+            ChannelGroupServiceImpl.cachedChannel = null
+            ChannelGroupServiceImpl.subscribe(true, localId, "[LOCAL] Sailing Uma", "local-icon")
+            ChannelGroupServiceImpl.subscribe(true, onlineId, null, null)
+            ChannelGroupServiceImpl.subscribe(true, "UCother", "Other", "other-icon")
+            val initialOrder = ChannelGroupServiceImpl.getSubscribedChannelGroup().items.map { it.channelId }
+            BrowseService2Wrapper.resetMetadataRepairForTests()
+            BrowseService2Wrapper.metadataLoader = { channelId ->
+                if (channelId == onlineId) Pair("Sailing Uma", "uma-icon") else null
+            }
+
+            assertTrue(BrowseService2Wrapper.repairMissingSubscribedChannelMetadata())
+            val saved = ChannelGroupServiceImpl.getSubscribedChannelGroup().items
+            assertEquals(initialOrder, saved.map { it.channelId })
+            assertEquals("Sailing Uma", saved.first { it.channelId == onlineId }.title)
+            assertEquals("uma-icon", saved.first { it.channelId == onlineId }.iconUrl)
+            assertEquals("[LOCAL] Sailing Uma", saved.first { it.channelId == localId }.title)
+            assertEquals("local-icon", saved.first { it.channelId == localId }.iconUrl)
+            assertEquals("Sailing Uma", BrowseService2Wrapper.getSubscribedChannels()
+                ?.mediaItems?.first { it.channelId == onlineId }?.title)
+        } finally {
+            BrowseService2Wrapper.resetMetadataRepairForTests()
+            profiles.select(original)
+            profiles.delete(profile.id)
+        }
+    }
+
+    @Test
+    fun aLateMetadataResultCannotChangeAnotherProfile() {
+        val profiles = LocalProfileManager.instance()
+        val original = profiles.getActiveId()
+        val source = profiles.create("metadata-source-profile")
+        val destination = profiles.create("metadata-destination-profile")
+        try {
+            profiles.select(source.id)
+            ChannelGroupServiceImpl.cachedChannel = null
+            ChannelGroupServiceImpl.subscribe(true, "UCsailinguma", null, null)
+            profiles.select(destination.id)
+            ChannelGroupServiceImpl.subscribe(true, "UCsailinguma", "Other profile", "icon")
+            assertFalse(ChannelGroupServiceImpl.updateSubscribedChannelMetadata(
+                "UCsailinguma", "Sailing Uma", "uma-icon", source.id
+            ))
+            assertEquals("Other profile", ChannelGroupServiceImpl.getSubscribedChannelGroup()
+                .items.first { it.channelId == "UCsailinguma" }.title)
+            profiles.select(source.id)
+            assertTrue(ChannelGroupServiceImpl.getSubscribedChannelGroup().items
+                .first { it.channelId == "UCsailinguma" }.title == null)
+        } finally {
+            profiles.select(original)
+            profiles.delete(destination.id)
+            profiles.delete(source.id)
+        }
+    }
 }

@@ -5,6 +5,8 @@ import com.liskovsoft.mediaserviceinterfaces.data.MediaItem
 import com.liskovsoft.youtubeapi.channelgroups.ChannelGroupServiceImpl
 import com.liskovsoft.youtubeapi.playlistgroups.PlaylistGroupServiceImpl
 import com.liskovsoft.youtubeapi.rss.RssService
+import com.liskovsoft.youtubeapi.service.YouTubeMediaItemService
+import com.liskovsoft.youtubeapi.service.internal.LocalProfileManager
 import com.liskovsoft.youtubeapi.service.data.YouTubeMediaGroup
 import com.liskovsoft.youtubeapi.service.data.YouTubeMediaItem
 
@@ -40,6 +42,69 @@ internal object BrowseService2Wrapper: BrowseService2() {
                 }
             }
         }
+    }
+
+    // Bound online metadata repair to a few missing entries per visit.
+    // It never changes a LOCAL subscription or replaces valid saved metadata.
+    private const val MAX_REPAIRS_PER_VISIT = 1
+    private const val RETRY_DELAY_MS = 5 * 60 * 1_000L
+    private val lastRepairAttempt = mutableMapOf<String, Long>()
+    internal var metadataLoader: (String) -> Pair<String?, String?>? = ::loadChannelMetadata
+
+    @JvmStatic
+    fun repairMissingSubscribedChannelMetadata(): Boolean {
+        val profileId = LocalProfileManager.instance().activeId
+        val now = System.currentTimeMillis()
+        val missing = ChannelGroupServiceImpl.getSubscribedChannelGroup().items
+            .filter { item ->
+                val id = item.channelId
+                id != null && id.isNotBlank() &&
+                    !id.startsWith("local-archive-channel:") &&
+                    (item.title.isNullOrBlank() || item.iconUrl.isNullOrBlank()) &&
+                    synchronized(lastRepairAttempt) {
+                        now - (lastRepairAttempt["$profileId:$id"] ?: 0L) >= RETRY_DELAY_MS
+                    }
+            }
+            .take(MAX_REPAIRS_PER_VISIT)
+
+        var changed = false
+        missing.forEach { item ->
+            val channelId = item.channelId ?: return@forEach
+            if (LocalProfileManager.instance().activeId != profileId) return@forEach
+            synchronized(lastRepairAttempt) {
+                lastRepairAttempt["$profileId:$channelId"] = System.currentTimeMillis()
+            }
+            try {
+                val result = metadataLoader(channelId)
+                if (result != null && ChannelGroupServiceImpl.updateSubscribedChannelMetadata(
+                    channelId, result.first, result.second, profileId
+                )) changed = true
+            } catch (e: Exception) {
+                android.util.Log.w("ChannelMetadataRepair", "Failed to repair channel metadata", e)
+            }
+        }
+        return changed
+    }
+
+    private fun loadChannelMetadata(channelId: String): Pair<String?, String?>? {
+        // Video images are not channel icons. Only use the author image from watch metadata.
+        val group = super.getChannelAsGrid(channelId)
+        val video = group?.mediaItems?.firstOrNull { !it.videoId.isNullOrBlank() }
+        if (video == null) return null
+        val metadata = try {
+            video.videoId?.let { YouTubeMediaItemService.instance().getMetadata(it) }
+        } catch (e: Exception) {
+            android.util.Log.w("ChannelMetadataRepair", "Video metadata unavailable: $channelId", e)
+            null
+        }
+        if (metadata?.channelId != null && metadata.channelId != channelId) return null
+        val title = metadata?.author?.takeIf { it.isNotBlank() } ?: video.author
+        return Pair(title, metadata?.authorImageUrl)
+    }
+
+    internal fun resetMetadataRepairForTests() {
+        synchronized(lastRepairAttempt) { lastRepairAttempt.clear() }
+        metadataLoader = ::loadChannelMetadata
     }
 
     override fun getMyPlaylists(): MediaGroup? {

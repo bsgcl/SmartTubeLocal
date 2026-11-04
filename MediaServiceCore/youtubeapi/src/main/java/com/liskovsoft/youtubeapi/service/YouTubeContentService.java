@@ -177,24 +177,36 @@ class YouTubeContentService implements ContentService {
         return getBrowseService2().getSubscribedChannels();
     }
 
+    private Observable<MediaGroup> subscribedChannelsWithRepair(
+            java.util.concurrent.Callable<MediaGroup> loadChannels) {
+        return RxHelper.create(emitter -> {
+            // Repair the saved list before its first emission. The UI may dispose
+            // the observable immediately after the first onNext callback.
+            BrowseService2Wrapper.repairMissingSubscribedChannelMetadata();
+            MediaGroup group = loadChannels.call();
+            if (group != null && !emitter.isDisposed()) emitter.onNext(group);
+            if (!emitter.isDisposed()) emitter.onComplete();
+        });
+    }
+
     @Override
     public Observable<MediaGroup> getSubscribedChannelsObserve() {
-        return RxHelper.fromCallable(this::getSubscribedChannels);
+        return subscribedChannelsWithRepair(this::getSubscribedChannels);
     }
 
     @Override
     public Observable<MediaGroup> getSubscribedChannelsByNewContentObserve() {
-        return RxHelper.fromCallable(this::getSubscribedChannelsByNewContent);
+        return subscribedChannelsWithRepair(this::getSubscribedChannelsByNewContent);
     }
 
     @Override
     public Observable<MediaGroup> getSubscribedChannelsByNameObserve() {
-        return RxHelper.fromCallable(this::getSubscribedChannelsByName);
+        return subscribedChannelsWithRepair(this::getSubscribedChannelsByName);
     }
 
     @Override
     public Observable<MediaGroup> getSubscribedChannelsByLastViewedObserve() {
-        return RxHelper.fromCallable(this::getSubscribedChannelsByLastViewed);
+        return subscribedChannelsWithRepair(this::getSubscribedChannelsByLastViewed);
     }
 
     @Override

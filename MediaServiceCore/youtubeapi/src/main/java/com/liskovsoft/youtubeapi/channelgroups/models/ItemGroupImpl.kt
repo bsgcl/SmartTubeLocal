@@ -51,6 +51,10 @@ internal data class ItemGroupImpl(
         onChange.invoke(this)
     }
 
+    internal fun replaceItem(index: Int, item: Item) {
+        items[index] = item
+    }
+
     override fun addAll(newItems: List<Item>) {
         items.removeAll(newItems)
         items.addAll(newItems)

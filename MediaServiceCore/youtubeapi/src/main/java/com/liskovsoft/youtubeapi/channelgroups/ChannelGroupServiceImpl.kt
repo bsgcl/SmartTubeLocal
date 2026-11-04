@@ -208,16 +208,49 @@ internal object ChannelGroupServiceImpl: MediaServicePrefs.ProfileChangeListener
         val group: ItemGroup = getSubscribedChannelGroup()
 
         if (subscribe) {
-            val realCachedChannel = cachedChannel
-            val newChannel = if (channelId == realCachedChannel?.channelId)
-                realCachedChannel
-            else ItemImpl(channelId, title, iconUrl)
-            group.add(newChannel)
+            val cached = cachedChannel?.takeIf { it.channelId == channelId }
+            val previous = group.items.firstOrNull { it.channelId == channelId }
+            val safeTitle = title?.takeIf { it.isNotBlank() }
+                ?: previous?.title?.takeIf { it.isNotBlank() }
+                ?: cached?.title?.takeIf { it.isNotBlank() }
+            val safeIcon = iconUrl?.takeIf { it.isNotBlank() }
+                ?: previous?.iconUrl?.takeIf { it.isNotBlank() }
+                ?: cached?.iconUrl?.takeIf { it.isNotBlank() }
+            group.add(ItemImpl(channelId, safeTitle, safeIcon))
         } else {
             group.remove(channelId)
         }
 
         persistDataNow()
+    }
+
+    /**
+     * Enrich a subscribed channel without changing its ID or its position.
+     * The profile check prevents a delayed network result from changing another profile.
+     */
+    @JvmStatic
+    fun updateSubscribedChannelMetadata(
+        channelId: String, title: String?, iconUrl: String?, expectedProfileId: String
+    ): Boolean {
+        if (com.liskovsoft.youtubeapi.service.internal.LocalProfileManager.instance().activeId != expectedProfileId) {
+            return false
+        }
+
+        val group = findChannelGroupById(SUBSCRIPTIONS_GROUP_ID) as? ItemGroupImpl ?: return false
+        val index = group.items.indexOfFirst { it.channelId == channelId }
+        if (index < 0) return false
+
+        val previous = group.items[index]
+        val safeTitle = previous.title?.takeIf { it.isNotBlank() } ?: title?.takeIf { it.isNotBlank() }
+        val safeIcon = previous.iconUrl?.takeIf { it.isNotBlank() } ?: iconUrl?.takeIf { it.isNotBlank() }
+        if (safeTitle == previous.title && safeIcon == previous.iconUrl) return false
+
+        group.replaceItem(index, ItemImpl(
+            channelId, safeTitle, safeIcon, previous.videoId, previous.subtitle,
+            previous.badge, previous.likeCount
+        ))
+        persistDataNow()
+        return true
     }
 
     override fun subscribeChannel(subscribe: Boolean, channelId: String, title: String?, iconUrl: String?) {
