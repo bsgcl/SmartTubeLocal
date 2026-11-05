@@ -47,11 +47,15 @@ import time
 
 FORMAT_VERSION = 1
 VIDEO_ID_RE = re.compile(r"^[A-Za-z0-9_-]{6,32}$")
+PLAYLIST_ID_RE = re.compile(r"^[A-Za-z0-9_-]{6,128}$")
 SIDECAR_SUFFIX = ".info.json"
 MEDIA_CANDIDATES = [".mp4", ".mkv", ".webm", ".mov", ".m4v"]
 THUMB_CANDIDATES = [".webp", ".jpg", ".jpeg", ".png"]
 MAX_VIDEOS = 5000
 MAX_CHANNELS = 500
+MAX_PLAYLISTS = 500
+MAX_PLAYLIST_ENTRIES = 5000
+MAX_TOTAL_PLAYLIST_SOURCE_ENTRIES = 50000
 RETRY_LIMIT = 5
 RETRY_SLEEP = 0.05
 KEEP_VERSIONS = 2
@@ -71,6 +75,19 @@ def safe_relative_path(path):
 
 def canonical_id(value):
     return value if value and VIDEO_ID_RE.match(value) else None
+
+
+def canonical_playlist_id(value):
+    return value if isinstance(value, str) and PLAYLIST_ID_RE.fullmatch(value) else None
+
+
+def channel_display_title(rel_dir, channel_id):
+    """Remove the bracketed canonical ID from a channel folder display name."""
+    name = (rel_dir or "").replace("\\", "/").rsplit("/", 1)[-1].strip()
+    suffix = " [" + channel_id + "]"
+    if name.endswith(suffix):
+        name = name[:-len(suffix)].rstrip()
+    return name or channel_id
 
 
 def fsync_dir(path):
@@ -214,12 +231,22 @@ def scan(root, meta_cache_path):
         sys.stderr.write("metadata cache invalid; performing full scan\n")
     cache_entries = cache["entries"] if cache else {}
     channels = {}
+    pending_entries = {}
     kept = set()
     total = 0
     sidecars_read = 0
     reused = 0
-    for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = [d for d in dirnames if d != "_catalogue"]
+    # Collect directory read failures: an unreachable/unreadable tree must
+    # never be mistaken for an empty archive.
+    scan_errors = []
+
+    def on_walk_error(name):
+        scan_errors.append(name)
+
+    for dirpath, dirnames, filenames in os.walk(root, onerror=on_walk_error):
+        # Ignore our isolated Gate 0 fixtures; they are not household videos.
+        dirnames[:] = [d for d in dirnames if d not in
+                       ("_catalogue", "_catalogue-source", "_stage3_gate")]
         rel_dir = os.path.relpath(dirpath, root).replace(os.sep, "/")
         if rel_dir == ".":
             rel_dir = ""
@@ -254,6 +281,15 @@ def scan(root, meta_cache_path):
             entry["_relDir"] = rel_dirname(rel_sidecar)
             entry["_base"] = rel_sidecar[:-len(SIDECAR_SUFFIX)]
             refresh_media_fields(root, entry)
+            # A feed-level .info.json has no playable media. yt-dlp also writes
+            # video metadata before the final MP4 move. Exclude both until the
+            # matching complete media file exists, without caching the entry.
+            if not entry["mediaPath"] or entry["mediaLength"] <= 0:
+                # Keep compact metadata for unchanged, unfinished and feed-only
+                # sidecars. Do not reread their potentially large JSON each scan.
+                pending_entries[rel_sidecar] = entry
+                kept.add(rel_sidecar)
+                continue
             kept.add(rel_sidecar)
             total += 1
             channels.setdefault(entry["channelId"], []).append(entry)
@@ -264,17 +300,130 @@ def scan(root, meta_cache_path):
         videos.sort(key=lambda e: (e["title"], e["videoId"]))  # stable ordering
     removed = sum(1 for key in cache_entries if key not in kept)
     stats = {"sidecarsRead": sidecars_read, "reused": reused,
-             "total": total, "deleted": removed}
-    return channels, total, stats, cache
+             "total": total, "deleted": removed, "errors": len(scan_errors)}
+    if scan_errors:
+        sys.stderr.write(f"WARNING: {len(scan_errors)} directory read "
+                         f"failure(s); scan may be incomplete\n")
+    return channels, total, stats, cache, pending_entries
 
 
-def content_signature(channels):
+def load_playlist_definitions(path):
+    """Load the manually refreshed source playlist inventory, if configured.
+
+    This file is deliberately separate from the live archive scan: normal
+    MeTube events reconcile known playlist membership without contacting
+    YouTube. A malformed configured file aborts publication instead of
+    silently erasing a previously published playlist index.
+    """
+    if not path or not os.path.isfile(path):
+        return []
+    with open(path, "r", encoding="utf-8") as fh:
+        root = json.load(fh)
+    if not isinstance(root, dict) or root.get("schemaVersion") != 1:
+        raise ValueError("playlist definitions schemaVersion must be 1")
+    channel_id = canonical_id(root.get("sourceChannelId"))
+    channel_title = root.get("sourceChannelTitle", channel_id)
+    playlists = root.get("playlists")
+    if (not channel_id or not isinstance(channel_title, str) or not channel_title.strip()
+            or len(channel_title) > 200 or not isinstance(playlists, list)
+            or len(playlists) > MAX_PLAYLISTS):
+        raise ValueError("invalid playlist definitions header")
+    result = []
+    seen = set()
+    total_entries = 0
+    for raw in playlists:
+        if not isinstance(raw, dict):
+            raise ValueError("playlist definition must be an object")
+        playlist_id = canonical_playlist_id(raw.get("playlistId"))
+        title = raw.get("title")
+        ids = raw.get("videoIds")
+        item_channel = canonical_id(raw.get("channelId"))
+        source_url = raw.get("sourceUrl")
+        source_count = raw.get("sourceVideoCount")
+        if (not playlist_id or playlist_id in seen or not isinstance(title, str)
+                or not title.strip() or len(title) > 300 or item_channel != channel_id
+                or not isinstance(source_url, str) or len(source_url) > 2048
+                or not source_url.startswith("https://www.youtube.com/playlist?")
+                or not isinstance(ids, list) or not isinstance(source_count, int)
+                or source_count < len(ids) or source_count > MAX_TOTAL_PLAYLIST_SOURCE_ENTRIES):
+            raise ValueError("invalid playlist definition record")
+        if any(not canonical_id(video_id) for video_id in ids):
+            raise ValueError("invalid video ID in playlist definition")
+        total_entries += len(ids)
+        if total_entries > MAX_TOTAL_PLAYLIST_SOURCE_ENTRIES:
+            raise ValueError("total source playlist entry limit exceeded")
+        seen.add(playlist_id)
+        result.append({"playlistId": playlist_id, "title": title.strip(),
+                       "channelId": item_channel, "sourceUrl": source_url,
+                       "channelTitle": channel_title.strip(),
+                       "sourceVideoCount": source_count, "videoIds": list(ids)})
+    return result
+
+
+def build_playlist_documents(definitions, channels):
+    """Reconcile ordered source IDs against playable archive media IDs."""
+    available = {
+        entry["videoId"]
+        for videos in channels.values()
+        for entry in videos
+        if safe_relative_path(entry.get("mediaPath")) and entry.get("mediaLength", -1) > 0
+    }
+    summaries = []
+    details = []
+    for definition in definitions:
+        source_ids = definition["videoIds"]
+        local_ids = [video_id for video_id in source_ids if video_id in available]
+        if len(local_ids) > MAX_PLAYLIST_ENTRIES:
+            raise ValueError("local playlist entry limit exceeded")
+        missing_count = len(source_ids) - len(local_ids)
+        summary = {
+            "playlistId": definition["playlistId"],
+            "title": definition["title"],
+            "channelId": definition["channelId"],
+            "channelTitle": definition["channelTitle"],
+            "videoCount": len(local_ids),
+            "sourceVideoCount": definition["sourceVideoCount"],
+            "missingVideoCount": max(0, definition["sourceVideoCount"] - len(local_ids)),
+            "thumbnailVideoId": local_ids[0] if local_ids else None,
+        }
+        detail = {
+            "formatVersion": FORMAT_VERSION,
+            "playlistId": definition["playlistId"],
+            "title": definition["title"],
+            "channelId": definition["channelId"],
+            "channelTitle": definition["channelTitle"],
+            "sourceVideoCount": definition["sourceVideoCount"],
+            "missingVideoCount": max(0, definition["sourceVideoCount"] - len(local_ids)),
+            "thumbnailVideoId": local_ids[0] if local_ids else None,
+            "videoIds": local_ids,
+        }
+        summaries.append(summary)
+        details.append((definition["playlistId"], detail))
+    return summaries, details
+
+
+def published_playlist_index_is_nonempty(root):
+    """Detect a missing source file that would otherwise erase a valid index."""
+    cat_dir = os.path.join(root, "_catalogue")
+    revision, ok = read_current_revision(cat_dir)
+    if not ok or not revision:
+        return False
+    path = os.path.join(cat_dir, f"v{revision}", "playlists.json")
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            document = json.load(fh)
+        return isinstance(document, dict) and bool(document.get("playlists"))
+    except (OSError, ValueError):
+        return False
+
+
+def content_signature(channels, playlist_details=None):
     """Stable content fingerprint of the catalogue payload (revision and
     timestamps excluded). Used to skip publishing unchanged catalogues."""
     payload = []
     for channel_id in sorted(channels):
         videos = channels[channel_id]
-        channel_title = videos[0]["_relDir"] or channel_id
+        channel_title = channel_display_title(videos[0]["_relDir"], channel_id)
         payload.append({
             "channelId": channel_id,
             "title": channel_title,
@@ -288,12 +437,14 @@ def content_signature(channels):
                 "thumbPath": e["thumbPath"],
             } for e in videos],
         })
-    blob = json.dumps(payload, ensure_ascii=False, sort_keys=True,
+    playlist_payload = [doc for _, doc in (playlist_details or [])]
+    blob = json.dumps({"channels": payload, "playlists": playlist_payload},
+                      ensure_ascii=False, sort_keys=True,
                       separators=(",", ":"))
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
 
-def save_meta_cache(path, channels, signature):
+def save_meta_cache(path, channels, signature, pending_entries=None):
     """Persist the metadata cache (outside the published catalogue). Entries
     are stored as-is minus the per-walk working fields."""
     entries = {}
@@ -303,6 +454,8 @@ def save_meta_cache(path, channels, signature):
             stored = dict(e)
             stored.pop("_relDir", None)
             entries[key] = stored
+    if pending_entries:
+        entries.update(pending_entries)
     doc = {"schema": META_CACHE_SCHEMA, "signature": signature, "entries": entries}
     return atomic_write(path, json.dumps(doc, ensure_ascii=False,
                                          separators=(",", ":")))
@@ -325,7 +478,7 @@ def read_current_revision(cat_dir):
         return None, False
 
 
-def publish(root, channels, total):
+def publish(root, channels, total, playlist_summaries=None, playlist_details=None):
     """Publish a complete new revision, all-or-nothing.
 
     Every required channel file is mandatory: if the library or ANY channel
@@ -346,9 +499,11 @@ def publish(root, channels, total):
 
     channel_docs = []
     library_channels = []
+    playlist_summaries = playlist_summaries or []
+    playlist_details = playlist_details or []
     for channel_id in sorted(channels):
         videos = channels[channel_id]
-        channel_title = videos[0]["_relDir"] or channel_id
+        channel_title = channel_display_title(videos[0]["_relDir"], channel_id)
         entries = [{
             "videoId": e["videoId"],
             "title": e["title"],
@@ -376,6 +531,11 @@ def publish(root, channels, total):
         "generatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "channels": library_channels,
     }
+    playlists_index = {
+        "formatVersion": FORMAT_VERSION,
+        "revision": new_revision,
+        "playlists": playlist_summaries,
+    }
 
     def abort(reason):
         remove_tree(version_dir)  # discard the partial revision
@@ -386,6 +546,7 @@ def publish(root, channels, total):
     os.makedirs(os.path.join(version_dir, "channels"), exist_ok=True)
     remove_tree(version_dir)  # discard any stale files from a reused number
     os.makedirs(os.path.join(version_dir, "channels"), exist_ok=True)
+    os.makedirs(os.path.join(version_dir, "playlists"), exist_ok=True)
     if not atomic_write(os.path.join(version_dir, "library.json"),
                         json.dumps(library, ensure_ascii=False,
                                    separators=(",", ":"))):
@@ -395,8 +556,20 @@ def publish(root, channels, total):
         if not atomic_write(target, json.dumps(doc, ensure_ascii=False,
                                                separators=(",", ":"))):
             return abort(f"channel write failed: {channel_id}")
+    if not atomic_write(os.path.join(version_dir, "playlists.json"),
+                        json.dumps(playlists_index, ensure_ascii=False,
+                                   separators=(",", ":"))):
+        return abort("playlists index write failed")
+    for playlist_id, doc in playlist_details:
+        doc = dict(doc)
+        doc["revision"] = new_revision
+        target = os.path.join(version_dir, "playlists", f"{playlist_id}.json")
+        if not atomic_write(target, json.dumps(doc, ensure_ascii=False,
+                                                separators=(",", ":"))):
+            return abort(f"playlist write failed: {playlist_id}")
     fsync_dir(version_dir)
     fsync_dir(os.path.join(version_dir, "channels"))
+    fsync_dir(os.path.join(version_dir, "playlists"))
 
     pointer = json.dumps({"formatVersion": FORMAT_VERSION,
                           "revision": new_revision})
@@ -422,34 +595,47 @@ def publish(root, channels, total):
     return True
 
 
-def run_once(root, publish_always=False):
+def run_once(root, publish_always=False, playlist_definitions_path=None):
     """One scan + conditional publish. Returns True when a revision was
     published (or already up to date and nothing needed doing)."""
     meta_cache_path = os.path.join(root, META_CACHE_NAME)
-    channels, total, stats, cache = scan(root, meta_cache_path)
-    signature = content_signature(channels)
+    if (playlist_definitions_path and not os.path.isfile(playlist_definitions_path)
+            and published_playlist_index_is_nonempty(root)):
+        sys.stderr.write("playlist definitions are missing while a published index exists; "
+                         "publication aborted to preserve it\n")
+        return False
+    try:
+        definitions = load_playlist_definitions(playlist_definitions_path)
+    except (OSError, ValueError) as error:
+        sys.stderr.write(f"playlist definitions invalid; publication aborted: {error}\n")
+        return False
+    channels, total, stats, cache, pending_entries = scan(root, meta_cache_path)
+    playlist_summaries, playlist_details = build_playlist_documents(definitions, channels)
+    signature = content_signature(channels, playlist_details)
     previous_signature = cache.get("signature") if cache else None
     saved = False
-    if total == 0 and previous_signature is None:
-        print("no valid sidecars found; nothing published")
-        return True
+    # An incomplete scan must never look like an unchanged or empty archive.
+    if stats.get("errors"):
+        sys.stderr.write(f"scan incomplete ({stats['errors']} read failure"
+                         "s); publication aborted; previous catalogue "
+                         "preserved\n")
+        return False
     if signature == previous_signature and not publish_always:
         print(f"no catalogue changes; skipping publish "
               f"(scanned {total}, sidecars read {stats['sidecarsRead']}, "
               f"reused {stats['reused']}, deleted {stats['deleted']})")
-        saved = save_meta_cache(meta_cache_path, channels, signature)
+        saved = save_meta_cache(meta_cache_path, channels, signature, pending_entries)
         return True
-    published = False
-    if total:
-        published = publish(root, channels, total)
-    else:
-        print("no valid sidecars found; nothing published")
+    # Publish a valid empty catalogue for a genuinely empty initial archive.
+    # The same code publishes an empty revision after the final video vanishes.
+    # All directory-read failures are rejected above, before this decision.
+    published = publish(root, channels, total, playlist_summaries, playlist_details)
     if published:
-        saved = save_meta_cache(meta_cache_path, channels, signature)
+        saved = save_meta_cache(meta_cache_path, channels, signature, pending_entries)
     elif cache is not None or previous_signature is not None:
         # Publication failed: keep the (possibly refreshed) metadata cache for
         # reuse, but keep the OLD signature so the next run retries publishing.
-        saved = save_meta_cache(meta_cache_path, channels, previous_signature)
+        saved = save_meta_cache(meta_cache_path, channels, previous_signature, pending_entries)
     if not saved:
         # A failed cache save is safe: the next run simply does a full scan.
         sys.stderr.write("metadata cache save failed; next scan will be full\n")
@@ -467,17 +653,21 @@ def main():
     parser.add_argument("--interval", type=int, default=60)
     parser.add_argument("--force", action="store_true",
                         help="publish even when content is unchanged")
+    parser.add_argument("--playlist-definitions", default=None,
+                        help="manually refreshed source definitions (default: ROOT/_catalogue-source/playlist-definitions.json)")
     args = parser.parse_args()
     root = args.root
     if not os.path.isdir(root):
         sys.stderr.write(f"root not found: {root}\n")
         return 2
+    playlist_definitions_path = args.playlist_definitions or os.path.join(
+        root, "_catalogue-source", "playlist-definitions.json")
     while True:
-        run_once(root, publish_always=args.force)
+        success = run_once(root, publish_always=args.force,
+                           playlist_definitions_path=playlist_definitions_path)
         if not args.watch:
-            break
+            return 0 if success else 1
         time.sleep(max(10, args.interval))
-    return 0
 
 
 if __name__ == "__main__":

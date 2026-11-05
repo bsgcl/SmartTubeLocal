@@ -24,6 +24,7 @@ import com.liskovsoft.smartyoutubetv2.common.app.presenters.ChannelPresenter;
 import com.liskovsoft.smartyoutubetv2.common.app.presenters.ChannelUploadsPresenter;
 import com.liskovsoft.smartyoutubetv2.common.app.presenters.PlaybackPresenter;
 import com.liskovsoft.smartyoutubetv2.common.local.LocalArchiveChannelIdentity;
+import com.liskovsoft.smartyoutubetv2.common.local.LocalArchivePlaylistIdentity;
 import com.liskovsoft.smartyoutubetv2.common.app.presenters.dialogs.menu.providers.channelgroup.ChannelGroupServiceWrapper;
 import com.liskovsoft.smartyoutubetv2.common.app.presenters.dialogs.menu.providers.ContextMenuManager;
 import com.liskovsoft.smartyoutubetv2.common.app.presenters.dialogs.menu.providers.ContextMenuProvider;
@@ -308,7 +309,11 @@ public class VideoMenuPresenter extends BaseMenuPresenter {
         mDialogPresenter.appendSingleButton(
                 UiOptionItem.from(getContext().getString(
                         mVideo.isPlaylistAsChannel() ? R.string.open_playlist : R.string.open_channel), optionItem -> {
-                    MediaServiceManager.chooseChannelPresenter(getContext(), mVideo);
+                    if (LocalArchivePlaylistIdentity.isLocalId(mVideo.channelId)) {
+                        ChannelUploadsPresenter.instance(getContext()).openChannel(mVideo);
+                    } else {
+                        MediaServiceManager.chooseChannelPresenter(getContext(), mVideo);
+                    }
                     mDialogPresenter.closeDialog();
                 }));
     }

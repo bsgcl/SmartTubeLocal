@@ -10,6 +10,7 @@ import org.junit.rules.TemporaryFolder;
 
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.nio.charset.Charset;
 
@@ -115,5 +116,74 @@ public class ArchiveCatalogueClientCacheTest {
         assertTrue(tmp.mkdirs()); // force the next update to fail
         ArchiveCatalogueClient.updateCache(dir, "library.json", "{\"bad\":2}");
         assertTrue("{\"valid\":1}".equals(read(new File(dir, "library.json"))));
+    }
+
+    // ---- Crash-window recovery tests (Phase 2.2) ----
+
+    @Test
+    public void crashAfterBackupMoveRestoresPreviousCacheOnNextLaunch() throws Exception {
+        // Process death between "target -> .bak" and "tmp -> target" leaves
+        // the valid cache ONLY in .bak. recoverInterruptedUpdates (run at
+        // construction, i.e. next launch) must restore it.
+        File dir = folder.newFolder();
+        assertTrue(ArchiveCatalogueClient.updateCache(dir, "library.json", "{\"valid\":1}"));
+        // Simulate the interrupted state: target renamed to .bak, tmp left behind.
+        assertTrue(new File(dir, "library.json").renameTo(new File(dir, "library.json.bak")));
+        write(new File(dir, "library.json.tmp"), "{\"half-written\":1}");
+        assertFalse(new File(dir, "library.json").exists());
+
+        ArchiveCatalogueClient.recoverInterruptedUpdates(dir);
+
+        assertTrue("previous valid cache restored from .bak",
+                "{\"valid\":1}".equals(read(new File(dir, "library.json"))));
+        assertFalse("backup consumed", new File(dir, "library.json.bak").exists());
+        assertFalse("stray tmp discarded", new File(dir, "library.json.tmp").exists());
+    }
+
+    @Test
+    public void crashRecoveryWithValidTargetDropsStaleBackup() throws Exception {
+        // If the update actually completed but .bak deletion was interrupted,
+        // the next launch must keep the valid target and discard the backup.
+        File dir = folder.newFolder();
+        write(new File(dir, "library.json"), "{\"new\":2}");
+        write(new File(dir, "library.json.bak"), "{\"old\":1}");
+        write(new File(dir, "library.json.tmp"), "junk");
+
+        ArchiveCatalogueClient.recoverInterruptedUpdates(dir);
+
+        assertTrue("{\"new\":2}".equals(read(new File(dir, "library.json"))));
+        assertFalse(new File(dir, "library.json.bak").exists());
+        assertFalse(new File(dir, "library.json.tmp").exists());
+    }
+
+    @Test
+    public void crashRecoveryCoversChannelCaches() throws Exception {
+        // Per-channel caches get the same recovery treatment.
+        File dir = folder.newFolder();
+        write(new File(dir, "channel-UCx.json.bak"), "{\"channel\":\"x\"}");
+        assertFalse(new File(dir, "channel-UCx.json").exists());
+
+        ArchiveCatalogueClient.recoverInterruptedUpdates(dir);
+
+        assertTrue("{\"channel\":\"x\"}".equals(read(new File(dir, "channel-UCx.json"))));
+    }
+
+    @Test
+    public void restartAfterCrashWindowThenNewUpdateSucceeds() throws Exception {
+        // Full lifecycle: valid cache -> crash window -> recovery -> new
+        // update installs normally.
+        File dir = folder.newFolder();
+        assertTrue(ArchiveCatalogueClient.updateCache(dir, "library.json", "v1"));
+        assertTrue(new File(dir, "library.json").renameTo(new File(dir, "library.json.bak")));
+        ArchiveCatalogueClient.recoverInterruptedUpdates(dir);
+        assertTrue("v1".equals(read(new File(dir, "library.json"))));
+        assertTrue(ArchiveCatalogueClient.updateCache(dir, "library.json", "v2"));
+        assertTrue("v2".equals(read(new File(dir, "library.json"))));
+    }
+
+    private static void write(File file, String text) throws Exception {
+        try (FileOutputStream out = new FileOutputStream(file)) {
+            out.write(text.getBytes(UTF8));
+        }
     }
 }

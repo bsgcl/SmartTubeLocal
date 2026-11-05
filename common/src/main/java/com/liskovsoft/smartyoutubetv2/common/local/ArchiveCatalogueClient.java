@@ -34,6 +34,42 @@ final class ArchiveCatalogueClient {
         this.client = client;
         this.archiveFolder = archiveFolder;
         this.cacheDir = new File(context.getFilesDir(), "local-archive-catalogue");
+        recoverInterruptedUpdates(this.cacheDir);
+    }
+
+    /**
+     * Crash recovery for every cache file: a process death between the
+     * "old -> .bak" and "tmp -> target" rename steps leaves the last valid
+     * cache only in the .bak file. On the next launch this restores it, so
+     * an interrupted update can never lose the previous valid catalogue.
+     * Stray .tmp files from interrupted writes are discarded.
+     */
+    static void recoverInterruptedUpdates(File cacheDir) {
+        try {
+            File[] files = cacheDir.listFiles();
+            if (files == null) return;
+            for (File file : files) {
+                String name = file.getName();
+                if (name.endsWith(".bak")) {
+                    String base = name.substring(0, name.length() - 4);
+                    File target = new File(cacheDir, base);
+                    if (!target.isFile()) {
+                        if (!file.renameTo(target)) {
+                            // Rename can fail transiently (e.g. file still
+                            // held); fall back to copy so recovery succeeds.
+                            copyFile(file, target);
+                            file.delete();
+                        }
+                    } else {
+                        file.delete();  // target already valid; drop the stale backup
+                    }
+                } else if (name.endsWith(".tmp")) {
+                    file.delete();
+                }
+            }
+        } catch (Exception ignored) {
+            // Recovery is best-effort; the share remains the source of truth.
+        }
     }
 
     /** Load pointer + library; fall back to the on-device cache when the refresh fails. */
@@ -75,7 +111,7 @@ final class ArchiveCatalogueClient {
 
     /** Lazily load one channel file; falls back to the per-channel cache. */
     String loadChannel(long revision, String channelId) throws IOException {
-        String cacheName = "channel-" + channelId + ".json";
+        String cacheName = "channel-r" + revision + "-" + channelId + ".json";
         String cachedText = readCache(cacheName);
         try {
             String text = new String(client.readSmallFile(
@@ -89,6 +125,56 @@ final class ArchiveCatalogueClient {
         } catch (Exception refreshError) {
             if (cachedText != null) return cachedText;
             throw new IOException("Channel refresh failed and no cached channel exists", refreshError);
+        }
+    }
+
+    /** Load the optional playlist index for this library revision. Older channel-only catalogues return an empty list. */
+    java.util.List<ArchiveCatalogue.PlaylistSummary> loadPlaylistsIndex(long revision) throws IOException {
+        String cacheName = "playlists-r" + revision + ".json";
+        String cachedText = readCache(cacheName);
+        try {
+            String text = new String(client.readSmallFile(
+                    join(archiveFolder, CATALOGUE_DIR, "v" + revision, "playlists.json"),
+                    ArchiveCatalogue.MAX_PLAYLISTS_BYTES), Charset.forName("UTF-8"));
+            java.util.List<ArchiveCatalogue.PlaylistSummary> playlists =
+                    ArchiveCatalogue.parsePlaylistsIndex(text, revision);
+            writeCache(cacheName, text);
+            return playlists;
+        } catch (Exception refreshError) {
+            if (cachedText != null) {
+                try {
+                    return ArchiveCatalogue.parsePlaylistsIndex(cachedText, revision);
+                } catch (IllegalArgumentException invalidCache) {
+                    // Do not use a malformed cache; older archive revisions may have no playlist index.
+                }
+            }
+            return java.util.Collections.emptyList();
+        }
+    }
+
+    /** Load and validate one playlist detail, cached by revision to avoid stale membership. */
+    String loadPlaylist(long revision, ArchiveCatalogue.PlaylistSummary summary) throws IOException {
+        String cacheName = "playlist-r" + revision + "-" + summary.playlistId + ".json";
+        String cachedText = readCache(cacheName);
+        try {
+            String text = new String(client.readSmallFile(
+                    join(archiveFolder, CATALOGUE_DIR, "v" + revision, "playlists",
+                            summary.playlistId + ".json"),
+                    ArchiveCatalogue.MAX_PLAYLIST_BYTES), Charset.forName("UTF-8"));
+            ArchiveCatalogue.parsePlaylist(text, revision, summary);
+            writeCache(cacheName, text);
+            return text;
+        } catch (Exception refreshError) {
+            if (cachedText != null) {
+                try {
+                    ArchiveCatalogue.parsePlaylist(cachedText, revision, summary);
+                    return cachedText;
+                } catch (IllegalArgumentException invalidCache) {
+                    // Fall through to the read failure below.
+                }
+            }
+            throw new IOException("Playlist refresh failed and no valid cached playlist exists",
+                    refreshError);
         }
     }
 
@@ -125,7 +211,9 @@ final class ArchiveCatalogueClient {
      * Sequence: write tmp -> move old target to .bak -> rename tmp onto
      * target -> delete .bak. If any rename fails, the previous file is
      * restored and the tmp is discarded, so a failed update always leaves
-     * the last valid cache in place.
+     * the last valid cache in place. If the process dies between the two
+     * renames, the next launch restores the .bak via
+     * {@link #recoverInterruptedUpdates()}.
      *
      * Callers must validate the text (parse) before calling; malformed JSON
      * never reaches this method.
@@ -163,6 +251,17 @@ final class ArchiveCatalogueClient {
         } catch (Exception error) {
             tmp.delete();
             return false;
+        }
+    }
+
+    private static void copyFile(File source, File target) {
+        try (InputStream in = new FileInputStream(source);
+             FileOutputStream out = new FileOutputStream(target)) {
+            byte[] buffer = new byte[8192];
+            int n;
+            while ((n = in.read(buffer)) != -1) out.write(buffer, 0, n);
+        } catch (Exception ignored) {
+            // Best-effort; the share remains the source of truth.
         }
     }
 

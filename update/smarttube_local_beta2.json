@@ -1,6 +1,28 @@
 {
   "package": {
-    "downloadUrl": "https://github.com/bsgcl/SmartTubeLocal/releases/download/v32.62-local/SmartTube_beta_32.62_universal.apk"
+    "downloadUrl": "https://github.com/bsgcl/SmartTubeLocal/releases/download/v32.65-local/SmartTube_beta_32.65_universal.apk"
+  },
+  "32.65": {
+    "versionCode": 2455,
+    "changelog": [
+      "Fixed playlist video starts opening the next-video carousel and shifting focus away from the player."
+    ]
+  },
+  "32.64": {
+    "versionCode": 2454,
+    "changelog": [
+      "Added original LearningMovements playlists to Local Library.",
+      "Preserved playlist names, source order and shared video membership for offline SMB playback."
+    ]
+  },
+  "32.63": {
+    "versionCode": 2453,
+    "changelog": [
+      "Local Library now loads a Pi-produced catalogue: fast startup without full SMB scans.",
+      "Channels load on demand; explicit refresh in Local Library settings.",
+      "Inaccurate media sizes and thumbnails update without rescanning.",
+      "Fixed empty library handling and improved update reliability."
+    ]
   },
   "32.62": {
     "versionCode": 2452,

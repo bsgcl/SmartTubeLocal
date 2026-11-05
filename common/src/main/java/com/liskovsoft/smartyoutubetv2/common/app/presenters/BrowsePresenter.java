@@ -745,7 +745,9 @@ public class BrowsePresenter extends BasePresenter<BrowseView> implements Sectio
             updateLocalChannelRows(section, videos);
             return;
         }
-        VideoGroup videoGroup = VideoGroup.from(videos, section);
+        List<Video> localItems = new ArrayList<>(videos);
+        localItems.addAll(LocalArchiveRepository.instance(getContext()).getLibraryPlaylistVideos());
+        VideoGroup videoGroup = VideoGroup.from(localItems, section);
         videoGroup.setAction(VideoGroup.ACTION_REPLACE);
         videoGroup.setId(videoGroup.hashCode());
         videoGroup.setTitle(section.getTitle());
@@ -776,6 +778,13 @@ public class BrowsePresenter extends BasePresenter<BrowseView> implements Sectio
             VideoGroup row = VideoGroup.from(channel.videos, section);
             row.setId(channel.id);
             row.setTitle(channel.title);
+            getView().updateSection(row);
+        }
+        List<Video> playlists = LocalArchiveRepository.instance(getContext()).getLibraryPlaylistVideos();
+        if (!playlists.isEmpty()) {
+            VideoGroup row = VideoGroup.from(playlists, section);
+            row.setId(("local-playlists:" + playlists.get(0).author).hashCode());
+            row.setTitle("[LOCAL] " + playlists.get(0).author + " playlists");
             getView().updateSection(row);
         }
         getView().showProgressBar(false);

@@ -6,6 +6,7 @@ import android.view.View;
 import android.view.WindowManager.LayoutParams;
 
 import com.liskovsoft.sharedutils.misc.WeakHashSet;
+import com.liskovsoft.sharedutils.prefs.GlobalPreferences;
 import com.liskovsoft.smartyoutubetv2.common.R;
 import com.liskovsoft.smartyoutubetv2.common.prefs.GeneralData;
 import com.liskovsoft.smartyoutubetv2.common.prefs.PlayerTweaksData;
@@ -17,6 +18,7 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.robolectric.Robolectric;
 import org.robolectric.RobolectricTestRunner;
+import org.robolectric.RuntimeEnvironment;
 import org.robolectric.android.controller.ActivityController;
 import org.robolectric.annotation.Config;
 import org.robolectric.shadows.ShadowLooper;
@@ -42,6 +44,7 @@ public class ScreensaverManagerTest {
 
     @Before
     public void setUp() throws Exception {
+        GlobalPreferences.instance(RuntimeEnvironment.getApplication());
         resetScreensaverRegistry();
         Utils.sHandler.removeCallbacksAndMessages(null);
     }
@@ -208,7 +211,7 @@ public class ScreensaverManagerTest {
     }
 
     @Test
-    public void pausedInstanceDoesNotAffectActiveInstanceOrStrandRegistryLock() throws Exception {
+    public void stoppedInstanceDoesNotAffectActiveInstanceOrStrandRegistryLock() throws Exception {
         ActivityController<BrowseHostActivity> browseController =
                 Robolectric.buildActivity(BrowseHostActivity.class);
         BrowseHostActivity browse = browseController.create().start().resume().get();
@@ -217,6 +220,7 @@ public class ScreensaverManagerTest {
         drainImmediateTasks();
 
         browseController.pause();
+        browseController.stop();
         drainImmediateTasks();
         assertFalse(isScreensaverSuppressed(browse));
 
@@ -244,6 +248,7 @@ public class ScreensaverManagerTest {
         assertFalse(isRegistryLocked());
 
         playerController.pause();
+        playerController.stop();
         browseController.resume();
         drainImmediateTasks();
 
@@ -287,7 +292,7 @@ public class ScreensaverManagerTest {
     }
 
     @Test
-    public void motherActivityPauseReleasesSuppression() {
+    public void motherActivityStopReleasesSuppression() {
         ActivityController<BrowseHostActivity> controller =
                 Robolectric.buildActivity(BrowseHostActivity.class);
         BrowseHostActivity activity = controller.create().start().resume().get();
@@ -300,6 +305,7 @@ public class ScreensaverManagerTest {
         assertTrue(isScreensaverSuppressed(activity));
 
         controller.pause();
+        controller.stop();
         drainImmediateTasks();
         advance(DIM_TIMEOUT_MS + SCREEN_OFF_TIMEOUT_MS);
 

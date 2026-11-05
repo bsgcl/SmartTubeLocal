@@ -59,7 +59,10 @@ public class LocalArchiveJvmTest {
         List<String> unicodePaths = new ArrayList<>();
 
         try (Stream<Path> paths = Files.walk(root)) {
-            paths.filter(Files::isRegularFile).forEach(path -> {
+            // The read-only archive also contains malformed producer test fixtures.
+            // Keep those isolated fixtures out of the real-sidecar smoke test.
+            paths.filter(path -> !relativePath(root, path).startsWith("_stage3_gate/"))
+                    .filter(Files::isRegularFile).forEach(path -> {
                 try {
                     String relative = relativePath(root, path);
                     long length = Files.size(path);

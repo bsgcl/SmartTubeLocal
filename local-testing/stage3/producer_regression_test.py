@@ -135,8 +135,9 @@ def main():
         entries = [c for c in lib["channels"]
                    if c["channelId"].endswith("00")][0]["videos"]
         orphan = [v for v in entries if not v["mediaPath"]]
-        check("F3 deleted media reflected in catalogue", len(orphan) == 1,
-              f"orphans={len(orphan)}")
+        # An unplayable entry must disappear, not remain in the TV catalogue.
+        check("F3 deleted media removed from catalogue", len(orphan) == 0 and len(entries) == 49,
+              f"orphans={len(orphan)}, count={len(entries)}")
 
         # --- Fix 3 scenario 7: invalid metadata cache -> full-scan recovery
         with open(os.path.join(root, prod.META_CACHE_NAME), "w") as fh:
@@ -196,7 +197,8 @@ def main():
         check("F1 published revision has every channel file", complete)
         count0 = [c for c in lib["channels"]
                   if c["channelId"].endswith("00")][0]["videoCount"]
-        check("F1 retry includes the pending new video", count0 == 51,
+        # The earlier missing-MP4 entry remains excluded. The new video is present.
+        check("F1 retry includes the pending new video", count0 == 50,
               f"count={count0}")
 
         # --- Fix 1 scenario D: unreadable pointer blocks unsafe revision reuse
@@ -222,6 +224,78 @@ def main():
         check("F1 previously advertised revision preserved by GC",
               os.path.isfile(os.path.join(root, "_catalogue", "v6",
                                           "library.json")))
+
+        # --- Phase 2.1: empty archive publication (fresh archive)
+        eroot = os.path.join(base, "empty-archive")
+        make_video(eroot, "Channel UC" + "B" * 22 + "01",
+                   "Last Video", "vlast001")
+        ok, reads = run_once(eroot)
+        check("E1 last-video archive publishes rev1",
+              ok and pointer_rev(eroot) == 1, f"rev={pointer_rev(eroot)}")
+
+        os.remove(os.path.join(eroot, "Channel UC" + "B" * 22 + "01",
+                               "Last Video [vlast001].info.json"))
+        ok, reads = run_once(eroot)
+        lib = json.load(open(os.path.join(
+            eroot, "_catalogue", "v2", "library.json"), encoding="utf-8"))
+        check("E1 empty archive publishes valid empty catalogue",
+              ok and pointer_rev(eroot) == 2 and lib["channels"] == [],
+              f"rev={pointer_rev(eroot)}")
+        empty_pointer = json.load(open(
+            os.path.join(eroot, "_catalogue", "pointer.json"),
+            encoding="utf-8"))
+        check("E1 pointer advances on empty publication",
+              empty_pointer["revision"] == 2)
+
+        ok, reads = run_once(eroot)
+        check("E1 empty catalogue not republished",
+              pointer_rev(eroot) == 2, f"rev={pointer_rev(eroot)}")
+
+        make_video(eroot, "Channel UC" + "B" * 22 + "01",
+                   "Back Again", "vback001")
+        ok, reads = run_once(eroot)
+        lib = json.load(open(os.path.join(
+            eroot, "_catalogue", "v3", "library.json"), encoding="utf-8"))
+        n_videos = sum(c["videoCount"] for c in lib["channels"])
+        check("E1 new video restores publication after empty state",
+              ok and pointer_rev(eroot) == 3 and n_videos == 1,
+              f"rev={pointer_rev(eroot)} videos={n_videos}")
+
+        # --- Phase 2.1: scan failure must never publish (empty-vs-unreachable)
+        orig_walk = prod.os.walk
+
+        def failing_walk(root_arg, onerror=None):
+            if onerror is not None:
+                onerror("simulated-read-failure")
+            return iter([])  # an unreachable mount looks like zero files
+
+        prod.os.walk = failing_walk
+        try:
+            ok, reads = run_once(eroot)
+        finally:
+            prod.os.walk = orig_walk
+        check("E1 incomplete scan aborts publication", not ok)
+        check("E1 previous catalogue preserved after scan failure",
+              pointer_rev(eroot) == 3,
+              f"rev={pointer_rev(eroot)}")
+
+        # --- Phase 2.1: storage failure mid-publish preserves previous
+        def failing_library_write(path, text):
+            if path.endswith("library.json"):
+                return False
+            return orig_atomic(path, text)
+
+        make_video(eroot, "Channel UC" + "B" * 22 + "01",
+                   "One More", "vmore001")
+        prod.atomic_write = failing_library_write
+        ok, reads = run_once(eroot)
+        prod.atomic_write = orig_atomic
+        check("E1 library write failure preserves previous catalogue",
+              not ok and pointer_rev(eroot) == 3,
+              f"rev={pointer_rev(eroot)}")
+        ok, reads = run_once(eroot)
+        check("E1 retry after storage failure publishes", ok and
+              pointer_rev(eroot) == 4, f"rev={pointer_rev(eroot)}")
 
         failed = [r for r in RESULTS if not r[1]]
         print(f"\n{len(RESULTS) - len(failed)}/{len(RESULTS)} scenarios passed")

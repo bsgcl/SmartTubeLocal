@@ -27,8 +27,13 @@ public final class ArchiveCatalogue {
     public static final int SUPPORTED_FORMAT_VERSION = 1;
     public static final int MAX_TOTAL_VIDEOS = 5_000;
     public static final int MAX_CHANNELS = 500;
+    public static final int MAX_PLAYLISTS = 500;
+    public static final int MAX_PLAYLIST_ENTRIES = 5_000;
+    public static final int MAX_TOTAL_SOURCE_PLAYLIST_ENTRIES = 50_000;
     static final int MAX_LIBRARY_BYTES = 8 * 1024 * 1024;
     static final int MAX_CHANNEL_BYTES = 4 * 1024 * 1024;
+    static final int MAX_PLAYLISTS_BYTES = 2 * 1024 * 1024;
+    static final int MAX_PLAYLIST_BYTES = 2 * 1024 * 1024;
 
     private ArchiveCatalogue() {
     }
@@ -57,6 +62,55 @@ public final class ArchiveCatalogue {
         }
     }
 
+    public static final class PlaylistSummary {
+        public final String playlistId;
+        public final String title;
+        public final String channelId;
+        public final String channelTitle;
+        public final int videoCount;
+        public final int sourceVideoCount;
+        public final int missingVideoCount;
+        public final String thumbnailVideoId;
+
+        PlaylistSummary(String playlistId, String title, String channelId, String channelTitle,
+                        int videoCount, int sourceVideoCount, int missingVideoCount,
+                        String thumbnailVideoId) {
+            this.playlistId = playlistId;
+            this.title = title;
+            this.channelId = channelId;
+            this.channelTitle = channelTitle;
+            this.videoCount = videoCount;
+            this.sourceVideoCount = sourceVideoCount;
+            this.missingVideoCount = missingVideoCount;
+            this.thumbnailVideoId = thumbnailVideoId;
+        }
+    }
+
+    public static final class PlaylistDocument {
+        public final String playlistId;
+        public final String title;
+        public final String channelId;
+        public final String channelTitle;
+        public final int sourceVideoCount;
+        public final int missingVideoCount;
+        public final String thumbnailVideoId;
+        /** Original source order, including intentional repeated IDs. */
+        public final List<String> videoIds;
+
+        PlaylistDocument(String playlistId, String title, String channelId, String channelTitle,
+                         int sourceVideoCount, int missingVideoCount, String thumbnailVideoId,
+                         List<String> videoIds) {
+            this.playlistId = playlistId;
+            this.title = title;
+            this.channelId = channelId;
+            this.channelTitle = channelTitle;
+            this.sourceVideoCount = sourceVideoCount;
+            this.missingVideoCount = missingVideoCount;
+            this.thumbnailVideoId = thumbnailVideoId;
+            this.videoIds = videoIds;
+        }
+    }
+
     public static final class CatalogueLibrary {
         public final long revision;
         public final String generatedAt;
@@ -65,15 +119,19 @@ public final class ArchiveCatalogue {
         public final Map<String, String> videoIndex;
         /** channelId -> fully usable items (media/thumb paths resolved). */
         public final Map<String, List<LocalArchiveItem>> itemsByChannel;
+        /** Playable local items keyed by canonical YouTube video ID. */
+        public final Map<String, LocalArchiveItem> availableItemsByVideo;
 
         CatalogueLibrary(long revision, String generatedAt,
                          List<ChannelSummary> channels, Map<String, String> videoIndex,
-                         Map<String, List<LocalArchiveItem>> itemsByChannel) {
+                         Map<String, List<LocalArchiveItem>> itemsByChannel,
+                         Map<String, LocalArchiveItem> availableItemsByVideo) {
             this.revision = revision;
             this.generatedAt = generatedAt;
             this.channels = channels;
             this.videoIndex = videoIndex;
             this.itemsByChannel = itemsByChannel;
+            this.availableItemsByVideo = availableItemsByVideo;
         }
 
         public String channelOf(String videoId) {
@@ -106,6 +164,7 @@ public final class ArchiveCatalogue {
         List<ChannelSummary> channels = new ArrayList<>();
         Map<String, String> videoIndex = new HashMap<>();
         Map<String, List<LocalArchiveItem>> itemsByChannel = new HashMap<>();
+        Map<String, LocalArchiveItem> availableItemsByVideo = new HashMap<>();
         int totalVideos = 0;
         for (JsonElement element : channelArray) {
             JsonObject channel = element.getAsJsonObject();
@@ -132,6 +191,10 @@ public final class ArchiveCatalogue {
                                 duration, null, optionalSafePath(video, "mediaPath"),
                                 optionalSafePath(video, "thumbPath"),
                                 optLong(video, "mediaLength", -1)));
+                        LocalArchiveItem item = items.get(items.size() - 1);
+                        if (item.isAvailable() && item.mediaLength > 0) {
+                            availableItemsByVideo.put(videoId, item);
+                        }
                     } catch (LocalArchiveIndexCore.InvalidArchiveMetadataException pathError) {
                         // Path unsafe for this entry: index the video without media access.
                     }
@@ -140,7 +203,104 @@ public final class ArchiveCatalogue {
             channels.add(new ChannelSummary(channelId, channelTitle, videos));
             itemsByChannel.put(channelId, items);
         }
-        return new CatalogueLibrary(revision, generatedAt, channels, videoIndex, itemsByChannel);
+        return new CatalogueLibrary(revision, generatedAt, channels, videoIndex,
+                itemsByChannel, availableItemsByVideo);
+    }
+
+    /** Parse the compact playlist index. Missing index files are handled by the caller for old channel-only catalogues. */
+    public static List<PlaylistSummary> parsePlaylistsIndex(String json, long expectedRevision) {
+        JsonObject root = requireObject(json);
+        requireVersion(root);
+        if (optLong(root, "revision", -1) != expectedRevision) {
+            throw invalid("Playlist index revision does not match library");
+        }
+        if (!root.has("playlists") || !root.get("playlists").isJsonArray()) {
+            throw invalid("Playlist index missing playlists");
+        }
+        JsonArray array = root.getAsJsonArray("playlists");
+        if (array.size() > MAX_PLAYLISTS) throw invalid("Playlist limit exceeded");
+        List<PlaylistSummary> result = new ArrayList<>();
+        Map<String, Boolean> seen = new HashMap<>();
+        for (JsonElement element : array) {
+            JsonObject playlist = element.getAsJsonObject();
+            String id = requirePlaylistId(playlist, "playlistId");
+            if (seen.put(id, Boolean.TRUE) != null) throw invalid("Duplicate playlistId: " + id);
+            String title = optString(playlist, "title", "").trim();
+            String channelId = requireCanonicalId(playlist, "channelId");
+            String channelTitle = optString(playlist, "channelTitle", "").trim();
+            int count = boundedCount(playlist, "videoCount", MAX_PLAYLIST_ENTRIES);
+            int sourceCount = boundedCount(playlist, "sourceVideoCount", MAX_TOTAL_SOURCE_PLAYLIST_ENTRIES);
+            int missingCount = boundedCount(playlist, "missingVideoCount", MAX_TOTAL_SOURCE_PLAYLIST_ENTRIES);
+            String thumbnailVideoId = optionalCanonicalId(playlist, "thumbnailVideoId");
+            if (title.isEmpty() || title.length() > 300 || channelTitle.isEmpty()
+                    || channelTitle.length() > 200 || count > sourceCount
+                    || missingCount > sourceCount || count + missingCount != sourceCount
+                    || (count == 0) != (thumbnailVideoId == null)) {
+                throw invalid("Invalid playlist summary");
+            }
+            result.add(new PlaylistSummary(id, title, channelId, channelTitle, count,
+                    sourceCount, missingCount, thumbnailVideoId));
+        }
+        return result;
+    }
+
+    /** Parse a versioned playlist detail and verify it against its summary. */
+    public static PlaylistDocument parsePlaylist(String json, long expectedRevision,
+                                                 PlaylistSummary expected) {
+        JsonObject root = requireObject(json);
+        requireVersion(root);
+        if (optLong(root, "revision", -1) != expectedRevision) {
+            throw invalid("Playlist detail revision does not match library");
+        }
+        String id = requirePlaylistId(root, "playlistId");
+        String title = optString(root, "title", "").trim();
+        String channelId = requireCanonicalId(root, "channelId");
+        String channelTitle = optString(root, "channelTitle", "").trim();
+        int sourceCount = boundedCount(root, "sourceVideoCount", MAX_TOTAL_SOURCE_PLAYLIST_ENTRIES);
+        int missingCount = boundedCount(root, "missingVideoCount", MAX_TOTAL_SOURCE_PLAYLIST_ENTRIES);
+        String thumbnailVideoId = optionalCanonicalId(root, "thumbnailVideoId");
+        if (!id.equals(expected.playlistId) || !title.equals(expected.title)
+                || !channelId.equals(expected.channelId)
+                || !channelTitle.equals(expected.channelTitle)
+                || sourceCount != expected.sourceVideoCount
+                || missingCount != expected.missingVideoCount
+                || !java.util.Objects.equals(thumbnailVideoId, expected.thumbnailVideoId)) {
+            throw invalid("Playlist detail identity does not match index");
+        }
+        if (!root.has("videoIds") || !root.get("videoIds").isJsonArray()) {
+            throw invalid("Playlist video IDs missing");
+        }
+        JsonArray ids = root.getAsJsonArray("videoIds");
+        if (ids.size() > MAX_PLAYLIST_ENTRIES || ids.size() != expected.videoCount) {
+            throw invalid("Playlist entry count is invalid");
+        }
+        List<String> videoIds = new ArrayList<>();
+        for (JsonElement element : ids) {
+            if (!element.isJsonPrimitive() || !element.getAsJsonPrimitive().isString()) {
+                throw invalid("Playlist video ID must be a string");
+            }
+            String videoId = element.getAsString();
+            if (!videoId.matches("[A-Za-z0-9_-]{6,32}")) {
+                throw invalid("Invalid playlist video ID");
+            }
+            videoIds.add(videoId);
+        }
+        if (sourceCount != missingCount + videoIds.size()) {
+            throw invalid("Playlist source and available counts do not match");
+        }
+        return new PlaylistDocument(id, title, channelId, channelTitle, sourceCount,
+                missingCount, thumbnailVideoId, videoIds);
+    }
+
+    private static int boundedCount(JsonObject object, String key, int maximum) {
+        long value = optLong(object, key, -1);
+        if (value < 0 || value > maximum) throw invalid("Invalid " + key);
+        return (int) value;
+    }
+
+    private static String optionalCanonicalId(JsonObject object, String key) {
+        if (!object.has(key) || object.get(key).isJsonNull()) return null;
+        return requireCanonicalId(object, key);
     }
 
     /**
@@ -205,6 +365,14 @@ public final class ArchiveCatalogue {
                 || root.get("formatVersion").getAsInt() != SUPPORTED_FORMAT_VERSION) {
             throw invalid("Unsupported catalogue formatVersion");
         }
+    }
+
+    private static String requirePlaylistId(JsonObject object, String key) {
+        String id = optString(object, key, "");
+        if (id.isEmpty() || !id.matches("[A-Za-z0-9_-]{6,128}")) {
+            throw invalid("Invalid playlist ID for " + key);
+        }
+        return id;
     }
 
     private static String requireCanonicalId(JsonObject object, String key) {

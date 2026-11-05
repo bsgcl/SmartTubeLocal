@@ -20,6 +20,7 @@ import com.liskovsoft.smartyoutubetv2.common.app.models.data.Playlist;
 import com.liskovsoft.smartyoutubetv2.common.app.models.data.Video;
 import com.liskovsoft.smartyoutubetv2.common.app.models.data.VideoGroup;
 import com.liskovsoft.smartyoutubetv2.common.app.models.playback.BasePlayerController;
+import com.liskovsoft.smartyoutubetv2.common.app.models.playback.manager.PlayerUI;
 import com.liskovsoft.smartyoutubetv2.common.app.models.playback.manager.PlayerConstants;
 import com.liskovsoft.smartyoutubetv2.common.app.models.playback.ui.OptionItem;
 import com.liskovsoft.smartyoutubetv2.common.app.models.playback.ui.SeekBarSegment;
@@ -90,14 +91,8 @@ public class SuggestionsController extends BasePlayerController {
         if (hasLocalPlaylistContext(item)) {
             VideoGroup group = item.getGroup();
             if (getPlayer() != null) {
-                getPlayer().clearSuggestions();
-                if (group != null && !group.isEmpty()) {
-                    getPlayer().updateSuggestions(group);
-                    getPlayer().showSuggestions(true);
-                    getPlayer().setNextTitle(getNext());
-                } else {
-                    getPlayer().showSuggestions(false);
-                }
+                updateLocalPlaylistOverlay(getPlayer(), group,
+                        group != null && !group.isEmpty() ? getNext() : null);
             }
             return;
         }
@@ -109,6 +104,19 @@ public class SuggestionsController extends BasePlayerController {
             return;
         }
         loadSuggestions(item);
+    }
+
+    /** Keep the local playlist ready for DOWN without forcing the carousel into view. */
+    static void updateLocalPlaylistOverlay(PlayerUI player, VideoGroup group, Video nextVideo) {
+        player.clearSuggestions();
+        if (group != null && !group.isEmpty()) {
+            player.updateSuggestions(group);
+            player.setNextTitle(nextVideo);
+        }
+        // A new video must return focus to its controls, even if the previous
+        // video ended with the suggestions row selected.
+        player.resetSuggestedPosition();
+        player.showControls(false);
     }
 
     // Could make negative impact on the video load time.

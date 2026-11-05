@@ -7,6 +7,7 @@ import android.os.Looper;
 import android.text.TextUtils;
 
 import com.liskovsoft.smartyoutubetv2.common.app.models.data.Video;
+import com.liskovsoft.mediaserviceinterfaces.data.MediaItem;
 import com.liskovsoft.smartyoutubetv2.common.app.presenters.BrowsePresenter;
 import com.liskovsoft.smartyoutubetv2.common.prefs.AppPrefs;
 import com.liskovsoft.sharedutils.mylogger.Log;
@@ -62,6 +63,7 @@ public final class LocalArchiveRepository implements AppPrefs.ProfileChangeListe
     private final Map<String, Long> artworkRetryAfter = new HashMap<>();
     private volatile boolean scanned;
     private volatile ArchiveCatalogue.CatalogueLibrary catalogueLibrary;
+    private volatile List<ArchiveCatalogue.PlaylistSummary> playlistSummaries = Collections.emptyList();
 
     private LocalArchiveRepository(Context context) {
         this.context = context.getApplicationContext();
@@ -82,6 +84,7 @@ public final class LocalArchiveRepository implements AppPrefs.ProfileChangeListe
         scanned = false;
         items = Collections.emptyList();
         catalogueLibrary = null;
+        playlistSummaries = Collections.emptyList();
     }
 
     @Override
@@ -93,6 +96,28 @@ public final class LocalArchiveRepository implements AppPrefs.ProfileChangeListe
         if (!settings.isLibraryEnabledForActiveProfile()) return Collections.emptyList();
         List<Video> result = new ArrayList<>();
         for (LocalArchiveItem item : items) result.add(toVideo(item));
+        return result;
+    }
+
+    /** Playlist cards are part of Local Library and never use an online playlist request. */
+    public List<Video> getLibraryPlaylistVideos() {
+        if (!settings.isLibraryEnabledForActiveProfile() || !scanned) return Collections.emptyList();
+        ArchiveCatalogue.CatalogueLibrary library = catalogueLibrary;
+        if (library == null) return Collections.emptyList();
+        List<Video> result = new ArrayList<>();
+        for (ArchiveCatalogue.PlaylistSummary summary : playlistSummaries) {
+            Video video = new Video();
+            video.title = summary.title;
+            video.author = summary.channelTitle;
+            video.secondTitle = summary.videoCount + " videos";
+            video.badge = summary.videoCount + " videos";
+            video.playlistId = summary.playlistId;
+            video.channelId = LocalArchivePlaylistIdentity.fromPlaylistId(summary.playlistId);
+            video.itemType = MediaItem.TYPE_PLAYLIST;
+            LocalArchiveItem first = library.availableItemsByVideo.get(summary.thumbnailVideoId);
+            if (first != null) video.cardImageUrl = getCachedArtworkUrl(first.videoId);
+            result.add(video);
+        }
         return result;
     }
 
@@ -240,6 +265,58 @@ public final class LocalArchiveRepository implements AppPrefs.ProfileChangeListe
         });
     }
 
+    /** Load only indexed, playable videos for a source playlist, preserving source order. */
+    public void loadPlaylistVideos(String playlistId, Callback<List<Video>> callback) {
+        if (TextUtils.isEmpty(playlistId) || !settings.isLibraryEnabledForActiveProfile()) {
+            main.post(() -> callback.onError("This profile does not have permission for the local archive"));
+            return;
+        }
+        io.execute(() -> {
+            try {
+                ensureCatalogueLoaded();
+                ArchiveCatalogue.CatalogueLibrary library = catalogueLibrary;
+                ArchiveCatalogue.PlaylistSummary summary = findPlaylistSummary(playlistId);
+                if (library == null || summary == null) {
+                    throw new IllegalStateException("This playlist is not in the configured archive catalogue");
+                }
+                LocalArchiveSettings.Config config = settings.getConfig();
+                String archiveFolder = LocalArchiveIndex.requireSafeRelativePath(config.archiveFolder);
+                SmbjArchiveClient client = newClient(config);
+                List<Video> videos;
+                try {
+                    client.connect();
+                    ArchiveCatalogueClient catalogue = new ArchiveCatalogueClient(client, archiveFolder, context);
+                    String json = catalogue.loadPlaylist(library.revision, summary);
+                    ArchiveCatalogue.PlaylistDocument detail =
+                            ArchiveCatalogue.parsePlaylist(json, library.revision, summary);
+                    videos = new ArrayList<>();
+                    int index = 0;
+                    for (String videoId : detail.videoIds) {
+                        LocalArchiveItem item = library.availableItemsByVideo.get(videoId);
+                        if (item == null || !item.isAvailable()) continue;
+                        Video video = toVideo(item);
+                        video.playlistId = playlistId;
+                        video.playlistIndex = index++;
+                        videos.add(video);
+                    }
+                } finally {
+                    client.close();
+                }
+                List<Video> result = videos;
+                main.post(() -> callback.onSuccess(result));
+            } catch (Exception error) {
+                main.post(() -> callback.onError(userSafeError(error)));
+            }
+        });
+    }
+
+    private ArchiveCatalogue.PlaylistSummary findPlaylistSummary(String playlistId) {
+        for (ArchiveCatalogue.PlaylistSummary summary : playlistSummaries) {
+            if (playlistId.equals(summary.playlistId)) return summary;
+        }
+        return null;
+    }
+
     /** Ensure the library catalogue is loaded without re-publishing scan side effects. */
     private void ensureCatalogueLoaded() throws Exception {
         if (scanned && catalogueLibrary != null) return;
@@ -333,14 +410,25 @@ public final class LocalArchiveRepository implements AppPrefs.ProfileChangeListe
             // scanning every yt-dlp .info.json sidecar over SMB.
             ArchiveCatalogueClient catalogue = new ArchiveCatalogueClient(client, archiveFolder, context);
             ArchiveCatalogue.CatalogueLibrary library = catalogue.loadLibrary();
+            List<ArchiveCatalogue.PlaylistSummary> playlists =
+                    catalogue.loadPlaylistsIndex(library.revision);
             List<LocalArchiveItem> indexed = new ArrayList<>();
             for (List<LocalArchiveItem> channelItems : library.itemsByChannel.values()) {
                 indexed.addAll(channelItems);
             }
             items = deduplicate(indexed);
             catalogueLibrary = library;
+            playlistSummaries = playlists;
             scanned = true;
-            cacheArtwork(client, archiveFolder, items, deadline);
+            List<LocalArchiveItem> prioritized = new ArrayList<>();
+            for (ArchiveCatalogue.PlaylistSummary playlist : playlists) {
+                LocalArchiveItem cover = library.availableItemsByVideo.get(playlist.thumbnailVideoId);
+                if (cover != null && !prioritized.contains(cover)) prioritized.add(cover);
+            }
+            for (LocalArchiveItem item : items) {
+                if (!prioritized.contains(item)) prioritized.add(item);
+            }
+            cacheArtwork(client, archiveFolder, prioritized, deadline);
         } finally {
             client.close();
         }
