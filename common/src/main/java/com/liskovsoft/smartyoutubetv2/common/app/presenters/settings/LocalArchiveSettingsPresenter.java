@@ -66,6 +66,7 @@ public final class LocalArchiveSettingsPresenter extends BasePresenter<Void> {
         appendAction(menu, "Replace SMB password",
                 () -> edit("SMB password", "", true, settings::setPassword));
         appendAction(menu, "Clear saved SMB password", () -> confirmClearPassword(settings));
+        appendAction(menu, "Refresh catalogue from SMB", this::refreshCatalogue);
         appendAction(menu, "Test and scan archive", this::scan);
         menu.showDialog("Local Library settings");
     }
@@ -137,7 +138,17 @@ public final class LocalArchiveSettingsPresenter extends BasePresenter<Void> {
         BrowsePresenter.instance(getContext()).refresh(false);
     }
 
+    /** Explicit Stage 3 catalogue refresh: re-read pointer + library from the share,
+     *  keeping the last valid cached catalogue if the refresh fails. */
+    private void refreshCatalogue() {
+        runScan("Refreshing catalogue...");
+    }
+
     private void scan() {
+        runScan("Testing connection and scanning archive...");
+    }
+
+    private void runScan(String progressMessage) {
         if (!new LocalArchiveSettings(getContext()).isLibraryEnabledForActiveProfile()) {
             Toast.makeText(getContext(), "Allow Local Library for this profile before scanning", Toast.LENGTH_LONG).show();
             return;
@@ -151,7 +162,7 @@ public final class LocalArchiveSettingsPresenter extends BasePresenter<Void> {
         ProgressDialog progress = new ProgressDialog(getContext());
         progress.setIndeterminate(true);
         progress.setCancelable(false);
-        progress.setMessage("Testing connection and scanning archive...");
+        progress.setMessage(progressMessage);
         progress.show();
 
         LocalArchiveRepository repository = LocalArchiveRepository.instance(getContext());

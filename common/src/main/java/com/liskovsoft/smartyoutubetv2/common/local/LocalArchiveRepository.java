@@ -17,7 +17,6 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.charset.Charset;
 import java.security.MessageDigest;
-import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -30,10 +29,6 @@ import java.util.concurrent.Executors;
 /** Bounded scanner and playback factory for the configured router archive. */
 public final class LocalArchiveRepository implements AppPrefs.ProfileChangeListener {
     private static final String TAG = LocalArchiveRepository.class.getSimpleName();
-    private static final int MAX_DEPTH = 4;
-    private static final int MAX_ENTRIES = 512;
-    private static final int MAX_SIDECARS = 128;
-    private static final int MAX_METADATA_BYTES = 1024 * 1024;
     private static final int MAX_ARTWORK_ITEMS = 64;
     private static final int MAX_ARTWORK_BYTES = 512 * 1024;
     private static final long MAX_SCAN_MILLIS = 60_000;
@@ -54,12 +49,6 @@ public final class LocalArchiveRepository implements AppPrefs.ProfileChangeListe
         }
     }
 
-    private static final class Folder {
-        final String path;
-        final int depth;
-        Folder(String path, int depth) { this.path = path; this.depth = depth; }
-    }
-
     private final Context context;
     private final LocalArchiveSettings settings;
     private final ExecutorService io = Executors.newSingleThreadExecutor(runnable -> {
@@ -72,6 +61,7 @@ public final class LocalArchiveRepository implements AppPrefs.ProfileChangeListe
     private final Map<String, List<Callback<String>>> artworkRequests = new HashMap<>();
     private final Map<String, Long> artworkRetryAfter = new HashMap<>();
     private volatile boolean scanned;
+    private volatile ArchiveCatalogue.CatalogueLibrary catalogueLibrary;
 
     private LocalArchiveRepository(Context context) {
         this.context = context.getApplicationContext();
@@ -91,6 +81,7 @@ public final class LocalArchiveRepository implements AppPrefs.ProfileChangeListe
     public synchronized void invalidate() {
         scanned = false;
         items = Collections.emptyList();
+        catalogueLibrary = null;
     }
 
     @Override
@@ -226,22 +217,76 @@ public final class LocalArchiveRepository implements AppPrefs.ProfileChangeListe
                 digest(item.videoId) + extension(item.artworkPath));
     }
 
-    /** Return only indexed archive entries whose canonical channel ID matches exactly. */
+    /** Return only indexed archive entries whose canonical channel ID matches exactly.
+     *  Stage 3: the per-channel catalogue file is fetched lazily on channel access,
+     *  falling back to the cached catalogue entries when the refresh fails. */
     public void loadChannelVideos(String channelId, Callback<List<Video>> callback) {
         if (TextUtils.isEmpty(channelId) || !settings.isLibraryEnabledForActiveProfile()) {
             main.post(() -> callback.onError("This profile does not have permission for the local archive"));
             return;
         }
-        scanAsync(new Callback<List<Video>>() {
-            @Override public void onSuccess(List<Video> videos) {
+        io.execute(() -> {
+            try {
+                ensureCatalogueLoaded();
+                refreshChannelFromShare(channelId);
                 List<Video> matches = new ArrayList<>();
-                for (Video video : videos) {
-                    if (channelId.equals(video.channelId)) matches.add(video);
+                for (LocalArchiveItem item : items) {
+                    if (channelId.equals(item.channelId)) matches.add(toVideo(item));
                 }
-                callback.onSuccess(matches);
+                main.post(() -> callback.onSuccess(matches));
+            } catch (Exception e) {
+                main.post(() -> callback.onError(userSafeError(e)));
             }
-            @Override public void onError(String message) { callback.onError(message); }
         });
+    }
+
+    /** Ensure the library catalogue is loaded without re-publishing scan side effects. */
+    private void ensureCatalogueLoaded() throws Exception {
+        if (scanned && catalogueLibrary != null) return;
+        scanNow();
+    }
+
+    /** Lazily fetch the channel's catalogue file and merge it into the item index. */
+    private void refreshChannelFromShare(String channelId) {
+        ArchiveCatalogue.CatalogueLibrary library = catalogueLibrary;
+        LocalArchiveSettings.Config config = settings.getConfig();
+        if (library == null || !config.isReady()) return;
+        try {
+            String archiveFolder = LocalArchiveIndex.requireSafeRelativePath(config.archiveFolder);
+            SmbjArchiveClient client = newClient(config);
+            try {
+                client.connect();
+                ArchiveCatalogueClient catalogue = new ArchiveCatalogueClient(client, archiveFolder, context);
+                String channelTitle = channelTitle(library, channelId);
+                String json = catalogue.loadChannel(library.revision, channelId);
+                List<LocalArchiveItem> fresh = ArchiveCatalogue.parseChannel(channelId, channelTitle, json);
+                mergeChannelItems(channelId, fresh);
+            } finally {
+                client.close();
+            }
+        } catch (Exception error) {
+            // Lazy refresh failed: the cached catalogue entries remain authoritative.
+            Log.e(TAG, "Lazy channel refresh failed; using cached catalogue: %s", error.toString());
+        }
+    }
+
+    private static String channelTitle(ArchiveCatalogue.CatalogueLibrary library, String channelId) {
+        for (ArchiveCatalogue.ChannelSummary channel : library.channels) {
+            if (channel.channelId.equals(channelId)) return channel.title;
+        }
+        return channelId;
+    }
+
+    private synchronized void mergeChannelItems(String channelId, List<LocalArchiveItem> fresh) {
+        ArchiveCatalogue.CatalogueLibrary library = catalogueLibrary;
+        if (library == null) return;
+        // Replace this channel's entries in the merged index; other channels untouched.
+        List<LocalArchiveItem> merged = new ArrayList<>();
+        for (LocalArchiveItem item : items) {
+            if (!channelId.equals(item.channelId)) merged.add(item);
+        }
+        merged.addAll(fresh);
+        items = deduplicate(merged);
     }
 
     public void startPlayback(String videoId, Callback<PlaybackSource> callback) {
@@ -281,53 +326,21 @@ public final class LocalArchiveRepository implements AppPrefs.ProfileChangeListe
         if (!config.isReady()) throw new IllegalStateException("Configure the SMB archive in Settings first");
         String archiveFolder = LocalArchiveIndex.requireSafeRelativePath(config.archiveFolder);
         SmbjArchiveClient client = newClient(config);
-        LinkedHashMap<String, Long> fileLengths = new LinkedHashMap<>();
-        LinkedHashMap<String, String> sidecars = new LinkedHashMap<>();
-        ArrayDeque<Folder> pending = new ArrayDeque<>();
         long deadline = System.currentTimeMillis() + MAX_SCAN_MILLIS;
-        int entryCount = 0;
         try {
             client.connect();
-            pending.add(new Folder(archiveFolder, 0));
-            while (!pending.isEmpty()) {
-                requireBeforeDeadline(deadline);
-                Folder folder = pending.removeFirst();
-                List<SmbjArchiveClient.Entry> entries = client.list(folder.path);
-                for (SmbjArchiveClient.Entry entry : entries) {
-                    if (++entryCount > MAX_ENTRIES) throw new IllegalStateException("Archive scan entry limit reached");
-                    String fullPath = join(folder.path, entry.name);
-                    String relative = fullPath.substring(archiveFolder.length()).replaceFirst("^/", "");
-                    if (relative.isEmpty()) continue;
-                    relative = LocalArchiveIndex.requireSafeRelativePath(relative);
-                    if (entry.directory) {
-                        if (folder.depth < MAX_DEPTH) pending.addLast(new Folder(fullPath, folder.depth + 1));
-                    } else {
-                        fileLengths.put(relative, entry.length);
-                        if (relative.toLowerCase(java.util.Locale.ROOT).endsWith(".info.json")) {
-                            if (sidecars.size() >= MAX_SIDECARS || System.currentTimeMillis() >= deadline) continue;
-                            try {
-                                byte[] bytes = client.readSmallFile(fullPath, MAX_METADATA_BYTES);
-                                sidecars.put(relative, new String(bytes, Charset.forName("UTF-8")));
-                            } catch (Exception ignored) {
-                                // A malformed or unreadable sidecar is omitted; other entries remain usable.
-                            }
-                        }
-                    }
-                }
-            }
+            // Stage 3: load the Pi-produced catalogue (pointer + library) instead of
+            // scanning every yt-dlp .info.json sidecar over SMB.
+            ArchiveCatalogueClient catalogue = new ArchiveCatalogueClient(client, archiveFolder, context);
+            ArchiveCatalogue.CatalogueLibrary library = catalogue.loadLibrary();
             List<LocalArchiveItem> indexed = new ArrayList<>();
-            for (Map.Entry<String, String> sidecar : sidecars.entrySet()) {
-                try {
-                    // Parse one sidecar at a time so one malformed item cannot hide the rest.
-                    Map<String, String> oneSidecar = Collections.singletonMap(sidecar.getKey(), sidecar.getValue());
-                    indexed.addAll(LocalArchiveIndex.build(oneSidecar, fileLengths));
-                } catch (JSONException ignored) {
-                    // The scan intentionally does not log sidecar contents or paths.
-                }
+            for (List<LocalArchiveItem> channelItems : library.itemsByChannel.values()) {
+                indexed.addAll(channelItems);
             }
             items = deduplicate(indexed);
-            cacheArtwork(client, archiveFolder, items, deadline);
+            catalogueLibrary = library;
             scanned = true;
+            cacheArtwork(client, archiveFolder, items, deadline);
         } finally {
             client.close();
         }
@@ -350,12 +363,6 @@ public final class LocalArchiveRepository implements AppPrefs.ProfileChangeListe
             } catch (Exception error) {
                 Log.e(TAG, "Local thumbnail scan copy failed: %s", error.toString());
             }
-        }
-    }
-
-    private void requireBeforeDeadline(long deadline) {
-        if (System.currentTimeMillis() >= deadline) {
-            throw new IllegalStateException("Archive scan time limit reached");
         }
     }
 
