@@ -111,19 +111,58 @@ final class ArchiveCatalogueClient {
     private void writeCache(String name, String text) {
         try {
             cacheDir.mkdirs();
-            File target = new File(cacheDir, name);
-            File tmp = new File(cacheDir, name + ".tmp");
+            updateCache(cacheDir, name, text);
+        } catch (Exception ignored) {
+            // Cache is best-effort; the share remains the source of truth.
+        }
+    }
+
+    /**
+     * Atomically replaces a cache file while guaranteeing that the previous
+     * valid file is never deleted before the replacement is fully installed
+     * (swap-through-backup; works on Android API 21+ local storage).
+     *
+     * Sequence: write tmp -> move old target to .bak -> rename tmp onto
+     * target -> delete .bak. If any rename fails, the previous file is
+     * restored and the tmp is discarded, so a failed update always leaves
+     * the last valid cache in place.
+     *
+     * Callers must validate the text (parse) before calling; malformed JSON
+     * never reaches this method.
+     *
+     * @return true when the replacement is installed, false when the
+     *         previous valid cache was preserved unchanged.
+     */
+    static boolean updateCache(File cacheDir, String name, String text) {
+        File target = new File(cacheDir, name);
+        File tmp = new File(cacheDir, name + ".tmp");
+        File backup = new File(cacheDir, name + ".bak");
+        try {
             try (FileOutputStream out = new FileOutputStream(tmp)) {
                 out.write(text.getBytes(Charset.forName("UTF-8")));
                 out.getFD().sync();
             }
-            if (!tmp.renameTo(target) && !target.delete()) {
-                // Leave the previous cache in place on failure.
-            } else if (!target.isFile()) {
-                // rename failed; nothing else to do this round.
+            boolean hadPrevious = target.isFile();
+            if (hadPrevious && !target.renameTo(backup)) {
+                // Could not move the old file aside: keep it untouched.
+                tmp.delete();
+                return false;
             }
-        } catch (Exception ignored) {
-            // Cache is best-effort; the share remains the source of truth.
+            if (!tmp.renameTo(target)) {
+                // Restore the previous cache before giving up.
+                if (hadPrevious) {
+                    backup.renameTo(target);  // best effort restore
+                }
+                tmp.delete();
+                return false;
+            }
+            if (backup.isFile()) {
+                backup.delete();
+            }
+            return true;
+        } catch (Exception error) {
+            tmp.delete();
+            return false;
         }
     }
 
