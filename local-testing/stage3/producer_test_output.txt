@@ -1,0 +1,58 @@
+﻿python : metadata cache invalid; performing full scan
+At line:1 char:1
++ python C:\SmartTube-stage3\local-testing\stage3\producer_regression_t ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (metadata cache ...rming full scan:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+publication aborted (channel write failed: UCUCAAAAAAAAAAAAAAAAAAAAAA00); previous revision 6 preserved
+publication aborted (pointer write failed); previous revision 6 preserved
+existing pointer unreadable; refusing to publish to avoid unsafe revision reuse
+published revision 1: 1500 videos, 30 channels
+sidecars read 1500, reused 0, deleted 0
+PASS  F3 first scan reads all sidecars  [reads=1500]
+PASS  F3 first scan publishes
+no catalogue changes; skipping publish (scanned 1500, sidecars read 0, reused 1500, deleted 0)
+PASS  F3 unchanged scan reopens zero sidecars  [reads=0]
+PASS  F3 unchanged scan does not publish
+published revision 2: 1501 videos, 30 channels
+sidecars read 1, reused 1500, deleted 0
+PASS  F3 new video: exactly one sidecar read  [reads=1]
+PASS  F3 new video published
+published revision 3: 1501 videos, 30 channels
+sidecars read 1, reused 1500, deleted 0
+PASS  F3 changed video: exactly one sidecar read  [reads=1]
+PASS  F3 changed video published
+published revision 4: 1500 videos, 30 channels
+sidecars read 0, reused 1500, deleted 1
+PASS  F3 deleted video: zero sidecar reads  [reads=0]
+PASS  F3 deleted video removed from catalogue  [count=50]
+published revision 5: 1500 videos, 30 channels
+sidecars read 0, reused 1500, deleted 0
+PASS  F3 deleted media: zero sidecar reads  [reads=0]
+PASS  F3 deleted media reflected in catalogue  [orphans=1]
+published revision 6: 1500 videos, 30 channels
+sidecars read 1500, reused 0, deleted 0
+PASS  F3 invalid cache triggers full scan  [reads=1500]
+PASS  F3 recovered catalogue published
+no catalogue changes; skipping publish (scanned 1500, sidecars read 0, reused 1500, deleted 0)
+PASS  F3 post-recovery no-change scan: zero reads, no publish  [reads=0 rev=6]
+PASS  F1 channel write failure aborts publication
+PASS  F1 previous revision preserved after channel failure
+PASS  F1 partial revision directory removed  [dirs=['v5', 'v6']]
+PASS  F1 pointer write failure aborts publication
+PASS  F1 previous revision preserved after pointer failure
+published revision 7: 1501 videos, 30 channels
+sidecars read 0, reused 1501, deleted 0
+PASS  F1 retry after failures publishes complete revision
+PASS  F1 published revision has every channel file
+PASS  F1 retry includes the pending new video  [count=51]
+PASS  F1 unreadable pointer refuses to publish
+PASS  F1 catalogue untouched when pointer unreadable
+PASS  F1 pointer stays unparsable (not advanced)
+published revision 7: 1502 videos, 30 channels
+sidecars read 0, reused 1502, deleted 0
+PASS  F1 publish over older advertised revision succeeds
+PASS  F1 previously advertised revision preserved by GC
+
+28/28 scenarios passed
