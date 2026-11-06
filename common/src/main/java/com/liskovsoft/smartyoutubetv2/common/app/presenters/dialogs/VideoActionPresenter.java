@@ -17,6 +17,19 @@ import com.liskovsoft.smartyoutubetv2.common.local.LocalArchivePlaylistIdentity;
 public class VideoActionPresenter extends BasePresenter<Void> {
     private static final String TAG = VideoActionPresenter.class.getSimpleName();
 
+    enum ClickRoute {
+        NO_ACTION,
+        LOCAL_PLAYBACK,
+        PLAY_VIDEO,
+        OPEN_CHANNEL,
+        OPEN_LOCAL_CONTENTS,
+        OPEN_PLAYLIST_CONTENTS,
+        PLAY_FIRST_PLAYLIST_ITEM,
+        SEEK_TO_CHAPTER,
+        SEARCH,
+        INVALID_ITEM
+    }
+
     private VideoActionPresenter(Context context) {
         super(context);
     }
@@ -26,43 +39,75 @@ public class VideoActionPresenter extends BasePresenter<Void> {
     }
 
     public void apply(Video item) {
-        if (item == null) {
-            return;
-        }
-
-        if (LocalArchiveChannelIdentity.isLocalId(item.channelId)) {
-            ChannelUploadsPresenter.instance(getContext()).openChannel(item);
-            return;
-        }
-
-        if (LocalArchivePlaylistIdentity.isLocalId(item.channelId)) {
-            ChannelUploadsPresenter.instance(getContext()).openChannel(item);
-            return;
-        }
-
-        if (item.isLocalArchive || item.isLocalArchiveOnly || item.hasLocalArchiveCopy || item.belongsToUserPlaylists()) {
-            LocalArchivePlaybackManager.instance(getContext()).play(item, item.isLocalArchive || item.isLocalArchiveOnly);
-            return;
-        }
-
-        // Show playlist contents in channel instead of instant playback
-        if (item.hasVideo() && !item.isBadgePlaylistInChannel()) {
-            PlaybackPresenter.instance(getContext()).openVideo(item);
-        } else if (item.hasChannel() || (item.belongsToChannelUploads() && item.hasNestedItems())) {
-            MediaServiceManager.chooseChannelPresenter(getContext(), item);
-        } else if (item.hasPlaylist() || item.hasNestedItems()) {
-            if (item.belongsToMusic()) {
-                startFistPlaylistItem(item);
-            } else {
+        ClickRoute route = selectRoute(item);
+        switch (route) {
+            case NO_ACTION:
+                return;
+            case LOCAL_PLAYBACK:
+                LocalArchivePlaybackManager.instance(getContext()).play(item, item.isLocalArchive || item.isLocalArchiveOnly);
+                return;
+            case PLAY_VIDEO:
+                PlaybackPresenter.instance(getContext()).openVideo(item);
+                return;
+            case OPEN_CHANNEL:
+                MediaServiceManager.chooseChannelPresenter(getContext(), item);
+                return;
+            case OPEN_LOCAL_CONTENTS:
+            case OPEN_PLAYLIST_CONTENTS:
                 ChannelUploadsPresenter.instance(getContext()).openChannel(item);
-            }
-        } else if (item.isChapter) {
-            PlaybackPresenter.instance(getContext()).setPosition(item.startTimeMs);
-        } else if (item.searchQuery != null ) {
-            SearchPresenter.instance(getContext()).onSearch(item.searchQuery);
-        } else {
-            MessageHelpers.showMessage(getContext(), "Video item doesn't contain needed data!");
+                return;
+            case PLAY_FIRST_PLAYLIST_ITEM:
+                startFistPlaylistItem(item);
+                return;
+            case SEEK_TO_CHAPTER:
+                PlaybackPresenter.instance(getContext()).setPosition(item.startTimeMs);
+                return;
+            case SEARCH:
+                SearchPresenter.instance(getContext()).onSearch(item.searchQuery);
+                return;
+            case INVALID_ITEM:
+                MessageHelpers.showMessage(getContext(), "Video item doesn't contain needed data!");
+                return;
         }
+    }
+
+    static ClickRoute selectRoute(Video item) {
+        if (item == null) {
+            return ClickRoute.NO_ACTION;
+        }
+
+        if (LocalArchiveChannelIdentity.isLocalId(item.channelId) ||
+                LocalArchivePlaylistIdentity.isLocalId(item.channelId)) {
+            return ClickRoute.OPEN_LOCAL_CONTENTS;
+        }
+
+        if (item.isLocalArchive || item.isLocalArchiveOnly || item.hasLocalArchiveCopy ||
+                (item.belongsToUserPlaylists() && hasValidVideoId(item))) {
+            return ClickRoute.LOCAL_PLAYBACK;
+        }
+
+        // Show playlist contents in channel instead of instant playback.
+        if (hasValidVideoId(item) && !item.isBadgePlaylistInChannel()) {
+            return ClickRoute.PLAY_VIDEO;
+        }
+        if (item.hasChannel() || (item.belongsToChannelUploads() && item.hasNestedItems())) {
+            return ClickRoute.OPEN_CHANNEL;
+        }
+        if (item.hasPlaylist() || item.hasNestedItems()) {
+            return item.belongsToMusic() ? ClickRoute.PLAY_FIRST_PLAYLIST_ITEM : ClickRoute.OPEN_PLAYLIST_CONTENTS;
+        }
+        if (item.isChapter) {
+            return ClickRoute.SEEK_TO_CHAPTER;
+        }
+        if (item.searchQuery != null) {
+            return ClickRoute.SEARCH;
+        }
+
+        return ClickRoute.INVALID_ITEM;
+    }
+
+    private static boolean hasValidVideoId(Video item) {
+        return item.videoId != null && !item.videoId.trim().isEmpty();
     }
 
     private void startFistPlaylistItem(Video item) {

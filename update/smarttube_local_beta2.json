@@ -1,6 +1,13 @@
 {
   "package": {
-    "downloadUrl": "https://github.com/bsgcl/SmartTubeLocal/releases/download/v32.65-local/SmartTube_beta_32.65_universal.apk"
+    "downloadUrl": "https://github.com/bsgcl/SmartTubeLocal/releases/download/v32.65.1-local/SmartTube_beta_32.65.1_universal.apk"
+  },
+  "32.65.1": {
+    "versionCode": 2458,
+    "changelog": [
+      "Fixed saved and imported YouTube playlists opening a black screen instead of their video lists.",
+      "Preserved existing profiles, [LOCAL] playlists and offline SMB playback."
+    ]
   },
   "32.65": {
     "versionCode": 2455,

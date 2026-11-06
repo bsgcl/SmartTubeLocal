@@ -111,33 +111,33 @@ internal object BrowseService2Wrapper: BrowseService2() {
         return getCachedPlaylists(super.getMyPlaylists())
     }
 
-    private fun getCachedPlaylists(myPlaylists: MediaGroup?): MediaGroup? {
+    internal fun getCachedPlaylists(myPlaylists: MediaGroup?): MediaGroup? {
         val playlistGroups = PlaylistGroupServiceImpl.getPlaylistGroups()
         if (playlistGroups.isNotEmpty()) {
             val result: MutableList<MediaItem> = mutableListOf()
-            // Pin playlists
-            myPlaylists?.mediaItems?.getOrNull(0)?.let { result.add(it) } // WatchLater
-            myPlaylists?.mediaItems?.firstOrNull { it.channelId?.startsWith(BrowseApiHelper.LIKED_CHANNEL_ID) ?: false }?.let { result.add(it) } // Liked
+            val matchedRemotePlaylists = mutableSetOf<MediaItem>()
+            fun isSavedPlaylist(item: MediaItem): Boolean = playlistGroups.any {
+                it.id == item.playlistId || it.id == item.reloadPageKey
+            }
 
-            var firstIdx: Int = -1
-            var firstIdxShift: Int = -1
+            // Keep the special entries pinned unless the active profile has a local saved
+            // copy, which must resolve from its stored items like every other saved list.
+            myPlaylists?.mediaItems?.firstOrNull {
+                it.playlistId == BrowseApiHelper.WATCH_LATER_PLAYLIST ||
+                    it.reloadPageKey == BrowseApiHelper.WATCH_LATER_PLAYLIST
+            }?.let {
+                if (isSavedPlaylist(it)) matchedRemotePlaylists.add(it) else result.add(it)
+            } // WatchLater
+            myPlaylists?.mediaItems?.firstOrNull { it.channelId?.startsWith(BrowseApiHelper.LIKED_CHANNEL_ID) ?: false }?.let {
+                if (isSavedPlaylist(it)) matchedRemotePlaylists.add(it) else result.add(it)
+            } // Liked
 
             playlistGroups.forEach { group ->
-                firstIdxShift++
-                // Replace local pl with matched remote one
+                // Suppress only a remote card with the same playlist ID. A title match can
+                // capture a different YouTube playlist with a coincidentally equal name.
                 if (myPlaylists?.mediaItems?.isNotEmpty() == true) {
-                    myPlaylists.mediaItems?.firstOrNull {
-                        // Can't match only by playlistId because we have only reloadPageKey
-                        it.title == group.title || it.playlistId == group.id
-                    }?.let {
-                        if (!result.contains(it)) {
-                            result.add(it)
-
-                            if (firstIdx == -1) { // Save idx of the first unpinned playlist (see above)
-                                firstIdx = myPlaylists.mediaItems?.indexOf(it) ?: -1
-                            }
-                        }
-                        return@forEach
+                    myPlaylists.mediaItems?.firstOrNull { it.playlistId == group.id || it.reloadPageKey == group.id }?.let {
+                        matchedRemotePlaylists.add(it)
                     }
                 }
 
@@ -146,21 +146,17 @@ internal object BrowseService2Wrapper: BrowseService2() {
                     title = group.title
                     cardImageUrl = group.items?.firstOrNull()?.iconUrl ?: group.iconUrl
                     playlistId = group.id
-                    channelId = group.id
-                    //reloadPageKey = group.id
+                    // A saved playlist is a playlist page, not a channel page. The reload
+                    // key makes the click resolve through getGroup() without remote metadata.
+                    reloadPageKey = group.id
                     badgeText = group.badge ?: "${group.items.size} videos"
                 })
             }
 
-            // Add remained remote playlists
-            myPlaylists?.mediaItems?.forEachIndexed { idx, item ->
-                if (!result.contains(item)) {
-                    // Move newer playlists before
-                    if (idx < firstIdx && result.size > (idx + firstIdxShift)) {
-                        result.add(idx + firstIdxShift, item)
-                    } else {
-                        result.add(item)
-                    }
+            // Preserve saved playlist order. Append unmatched remote playlists afterwards.
+            myPlaylists?.mediaItems?.forEach { item ->
+                if (!matchedRemotePlaylists.contains(item) && !result.contains(item)) {
+                    result.add(item)
                 }
             }
 
@@ -173,20 +169,31 @@ internal object BrowseService2Wrapper: BrowseService2() {
     }
 
     override fun getGroup(reloadPageKey: String, type: Int, title: String?): MediaGroup? {
-        return super.getGroup(reloadPageKey, type, title) ?: getCachedGroup(reloadPageKey, type)
+        return resolveGroup(reloadPageKey, type, title) { key, groupType, groupTitle ->
+            super.getGroup(key, groupType, groupTitle)
+        }
+    }
+
+    internal fun resolveGroup(
+        reloadPageKey: String,
+        type: Int,
+        title: String?,
+        remoteLoader: (String, Int, String?) -> MediaGroup?
+    ): MediaGroup? {
+        return getCachedGroup(reloadPageKey, type) ?: remoteLoader(reloadPageKey, type, title)
     }
 
     override fun getChannel(channelId: String?, params: String?): Pair<List<MediaGroup?>?, String?>? {
-        return super.getChannel(channelId, params) ?: getCachedGroup(channelId, MediaGroup.TYPE_CHANNEL_UPLOADS)?.let { Pair(listOf(it), null) }
+        return super.getChannel(channelId, params)
     }
 
     override fun getChannelAsGrid(channelId: String?): MediaGroup? {
-        return super.getChannelAsGrid(channelId) ?: getCachedGroup(channelId, MediaGroup.TYPE_CHANNEL_UPLOADS)
+        return super.getChannelAsGrid(channelId)
     }
 
-    private fun getCachedGroup(reloadPageKey: String?, type: Int): MediaGroup? {
+    internal fun getCachedGroup(reloadPageKey: String?, type: Int): MediaGroup? {
         val group = PlaylistGroupServiceImpl.findPlaylistGroup(reloadPageKey)
-        if (group != null && !group.isEmpty) {
+        if (group != null) {
             return YouTubeMediaGroup(type).apply {
                 title = group.title
                 mediaItems = group.items?.map {
