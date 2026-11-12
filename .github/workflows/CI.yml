@@ -1,8 +1,6 @@
 name: Build Debug APK
 
 on:
-  push:
-    branches: [ "master", "local-profiles-v1" ]
   workflow_dispatch:
 
 jobs:
