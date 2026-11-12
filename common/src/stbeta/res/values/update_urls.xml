@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string-array name="update_urls">
+        <item>https://raw.githubusercontent.com/bsgcl/SmartTubeLocal/master/update/smarttube_local_beta2.json</item>
+    </string-array>
+</resources>

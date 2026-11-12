@@ -1,0 +1,444 @@
+package com.liskovsoft.smartyoutubetv2.common.app.presenters;
+
+import android.annotation.SuppressLint;
+import android.content.Context;
+import android.text.TextUtils;
+
+import com.liskovsoft.mediaserviceinterfaces.data.MediaGroup;
+import com.liskovsoft.mediaserviceinterfaces.data.MediaItem;
+import com.liskovsoft.mediaserviceinterfaces.data.MediaItemMetadata;
+import com.liskovsoft.sharedutils.helpers.Helpers;
+import com.liskovsoft.sharedutils.helpers.MessageHelpers;
+import com.liskovsoft.sharedutils.mylogger.Log;
+import com.liskovsoft.sharedutils.rx.RxHelper;
+import com.liskovsoft.smartyoutubetv2.common.R;
+import com.liskovsoft.smartyoutubetv2.common.app.models.data.SimpleMediaItem;
+import com.liskovsoft.smartyoutubetv2.common.app.models.data.Video;
+import com.liskovsoft.smartyoutubetv2.common.app.models.data.VideoGroup;
+import com.liskovsoft.smartyoutubetv2.common.app.presenters.base.BasePresenter;
+import com.liskovsoft.smartyoutubetv2.common.app.presenters.dialogs.VideoActionPresenter;
+import com.liskovsoft.smartyoutubetv2.common.app.presenters.dialogs.menu.VideoMenuPresenter;
+import com.liskovsoft.smartyoutubetv2.common.app.presenters.dialogs.menu.VideoMenuPresenter.VideoMenuCallback;
+import com.liskovsoft.smartyoutubetv2.common.app.presenters.interfaces.VideoGroupPresenter;
+import com.liskovsoft.smartyoutubetv2.common.app.views.ChannelUploadsView;
+import com.liskovsoft.smartyoutubetv2.common.misc.BrowseProcessorManager;
+import com.liskovsoft.smartyoutubetv2.common.misc.MediaServiceManager;
+import com.liskovsoft.smartyoutubetv2.common.misc.MediaServiceManager.OnComplete;
+import com.liskovsoft.smartyoutubetv2.common.misc.MediaServiceManager.OnError;
+import com.liskovsoft.smartyoutubetv2.common.misc.MediaServiceManager.OnMediaGroup;
+import com.liskovsoft.smartyoutubetv2.common.local.LocalArchiveChannelIdentity;
+import com.liskovsoft.smartyoutubetv2.common.local.LocalArchivePlaylistIdentity;
+import com.liskovsoft.smartyoutubetv2.common.local.LocalArchiveRepository;
+import com.liskovsoft.youtubeapi.service.data.YouTubeMediaGroup;
+
+import io.reactivex.Observable;
+import io.reactivex.disposables.Disposable;
+
+import java.util.List;
+
+public class ChannelUploadsPresenter extends BasePresenter<ChannelUploadsView> implements VideoGroupPresenter {
+    private static final String TAG = ChannelUploadsPresenter.class.getSimpleName();
+    @SuppressLint("StaticFieldLeak")
+    private static ChannelUploadsPresenter sInstance;
+    private final BrowseProcessorManager mBrowseProcessor;
+    private Disposable mUpdateAction;
+    private Disposable mScrollAction;
+    private Video mChannel;
+    private MediaGroup mPendingGroup;
+    private VideoGroup mBaseGroup;
+    private final ChannelUploadsLoadState mLoadState = new ChannelUploadsLoadState();
+
+    public ChannelUploadsPresenter(Context context) {
+        super(context);
+        mBrowseProcessor = new BrowseProcessorManager(getContext(), this::syncItem);
+    }
+
+    public static ChannelUploadsPresenter instance(Context context) {
+        if (sInstance == null) {
+            sInstance = new ChannelUploadsPresenter(context);
+        }
+
+        sInstance.setContext(context);
+
+        return sInstance;
+    }
+
+    @Override
+    public void onViewInitialized() {
+        super.onViewInitialized();
+
+        refresh();
+    }
+
+    @Override
+    public void onViewDestroyed() {
+        super.onViewDestroyed();
+        disposeActions();
+    }
+
+    @Override
+    public void onFinish() {
+        super.onFinish();
+
+        // Destroy the cache only (!) when user pressed back (e.g. wants to explicitly kill the activity)
+        // Otherwise keep the cache to easily restore in case activity is killed by the system.
+        disposeActions();
+        mChannel = null;
+        mPendingGroup = null;
+        mBaseGroup = null;
+    }
+
+    @Override
+    public void onVideoItemSelected(Video item) {
+        // NOP
+    }
+
+    @Override
+    public void onVideoItemClicked(Video item) {
+        VideoActionPresenter.instance(getContext()).apply(item);
+    }
+
+    @Override
+    public void onVideoItemLongClicked(Video item) {
+        VideoMenuPresenter.instance(getContext()).showMenu(item, (videoItem, action) -> {
+            if (action == VideoMenuCallback.ACTION_REMOVE_FROM_PLAYLIST) {
+                removeItem(videoItem);
+            } else if (action == VideoMenuCallback.ACTION_UNSUBSCRIBE) {
+                if (LocalArchiveChannelIdentity.isLocalId(videoItem.channelId)) {
+                    getViewManager().startView(com.liskovsoft.smartyoutubetv2.common.app.views.BrowseView.class);
+                    BrowsePresenter.instance(getContext()).refresh(false);
+                    return;
+                }
+                MessageHelpers.showMessage(getContext(), R.string.unsubscribed_from_channel);
+            }
+        });
+    }
+
+    @Override
+    public void onScrollEnd(Video item) {
+        if (item == null) {
+            Log.e(TAG, "Can't scroll. Video is null.");
+            return;
+        }
+
+        VideoGroup group = item.getGroup();
+
+        if (group == null) {
+            Log.e(TAG, "Can't scroll. VideoGroup is null.");
+            return;
+        }
+
+        Log.d(TAG, "onScrollEnd: Group title: " + group.getTitle());
+
+        boolean scrollInProgress = mScrollAction != null && !mScrollAction.isDisposed();
+
+        if (!scrollInProgress) {
+            continueGroup(group);
+        }
+    }
+
+    @Override
+    public boolean hasPendingActions() {
+        return RxHelper.isAnyActionRunning(mScrollAction, mUpdateAction);
+    }
+
+    public void openChannel(Video item) {
+        // Working with uploads or playlists
+        if (item == null || (!item.hasNestedItems() && !item.hasPlaylist() &&
+                !LocalArchiveChannelIdentity.isLocalId(item.channelId))) {
+            return;
+        }
+
+        boolean viewAlreadyActive = getView() != null;
+        clear();
+
+        mChannel = item;
+
+        getViewManager().startView(ChannelUploadsView.class);
+
+        // A newly-created view calls refresh() from onViewInitialized. Only issue
+        // the direct load when this view was already active, otherwise it is duplicated.
+        if (viewAlreadyActive && getView() != null) {
+            update(item);
+        }
+    }
+
+    public void obtainGroup(Video item, OnMediaGroup callback) {
+        obtainGroup(item, callback, null, null);
+    }
+
+    public void obtainGroup(Video item, OnMediaGroup callback, OnError onError, OnComplete onComplete) {
+        if (item != null && item.mediaItem != null) {
+            obtainGroup(item.mediaItem, callback, onError, onComplete);
+        }
+    }
+
+    public Observable<MediaGroup> obtainUploadsObservable(Video item) {
+        if (item == null) {
+            return null;
+        }
+
+        if (item.mediaItem == null) {
+            item.mediaItem = SimpleMediaItem.from(item);
+        }
+
+        if (LocalArchivePlaylistIdentity.isLocalId(item.channelId)) {
+            String playlistId = LocalArchivePlaylistIdentity.playlistId(item.channelId);
+            String title = item.title;
+            return Observable.create(emitter -> LocalArchiveRepository.instance(getContext()).loadPlaylistVideos(
+                    playlistId, new LocalArchiveRepository.Callback<List<Video>>() {
+                        @Override public void onSuccess(List<Video> videos) {
+                            if (emitter.isDisposed()) return;
+                            YouTubeMediaGroup group = new YouTubeMediaGroup(0);
+                            group.setTitle(title);
+                            java.util.ArrayList<MediaItem> mediaItems = new java.util.ArrayList<>();
+                            for (Video video : videos) mediaItems.add(SimpleMediaItem.from(video));
+                            group.setMediaItems(mediaItems);
+                            emitter.onNext(group);
+                            emitter.onComplete();
+                        }
+                        @Override public void onError(String message) {
+                            if (!emitter.isDisposed()) emitter.onError(new IllegalStateException(message));
+                        }
+                    }));
+        }
+
+        if (LocalArchiveChannelIdentity.isLocalId(item.channelId)) {
+            String canonicalId = LocalArchiveChannelIdentity.canonicalId(item.channelId);
+            String title = item.title;
+            return Observable.create(emitter -> LocalArchiveRepository.instance(getContext()).loadChannelVideos(
+                    canonicalId, new LocalArchiveRepository.Callback<List<Video>>() {
+                        @Override public void onSuccess(List<Video> videos) {
+                            if (emitter.isDisposed()) return;
+                            YouTubeMediaGroup group = new YouTubeMediaGroup(0);
+                            group.setTitle(title);
+                            java.util.ArrayList<MediaItem> mediaItems = new java.util.ArrayList<>();
+                            for (Video video : videos) mediaItems.add(SimpleMediaItem.from(video));
+                            group.setMediaItems(mediaItems);
+                            emitter.onNext(group);
+                            emitter.onComplete();
+                        }
+                        @Override public void onError(String message) {
+                            if (!emitter.isDisposed()) emitter.onError(new IllegalStateException(message));
+                        }
+                    }));
+        }
+
+        disposeActions();
+
+        return item.hasNestedItems() || item.isChannel() ?
+               getContentService().getGroupObserve(item.mediaItem != null ? item.mediaItem : SimpleMediaItem.from(item)) :
+               item.hasReloadPageKey() ?
+               getContentService().getGroupObserve(item.getReloadPageKey()) :
+               getMediaItemService().getMetadataObserve(item.videoId, item.playlistId, 0, item.playlistParams)
+                       .flatMap(mediaItemMetadata -> Observable.just(findPlaylistRow(mediaItemMetadata)));
+    }
+
+    public Video getChannel() {
+        return mChannel;
+    }
+
+    public void setChannel(Video channel) {
+        mChannel = channel;
+    }
+
+    private void disposeActions() {
+        mLoadState.cancel();
+        RxHelper.disposeActions(mUpdateAction, mScrollAction);
+        mUpdateAction = null;
+        mScrollAction = null;
+        MediaServiceManager.instance().disposeActions();
+        mBrowseProcessor.dispose();
+        if (getView() != null) getView().showProgressBar(false);
+    }
+
+    private void continueGroup(VideoGroup group) {
+        if (mChannel != null && (LocalArchiveChannelIdentity.isLocalId(mChannel.channelId)
+                || LocalArchivePlaylistIdentity.isLocalId(mChannel.channelId))) return;
+        disposeActions();
+
+        if (getView() == null) {
+            Log.e(TAG, "Can't continue group. The view is null.");
+            return;
+        }
+
+        if (group == null) {
+            Log.e(TAG, "Can't continue group. The group is null.");
+            return;
+        }
+
+        Log.d(TAG, "continueGroup: start continue group: " + group.getTitle());
+
+        getView().showProgressBar(true);
+
+        MediaGroup mediaGroup = group.getMediaGroup();
+        long request = mLoadState.begin();
+
+        Observable<MediaGroup> continuation;
+
+        continuation = getContentService().continueGroupObserve(mediaGroup);
+
+        mScrollAction = continuation
+                .subscribe(
+                        continueMediaGroup -> {
+                            if (!mLoadState.isCurrent(request) || getView() == null) return;
+                            VideoGroup newGroup = VideoGroup.from(group, continueMediaGroup);
+                            getView().update(newGroup);
+                            mBrowseProcessor.process(newGroup);
+                            getView().showProgressBar(false);
+                        },
+                        error -> {
+                            if (!mLoadState.isCurrent(request)) return;
+                            Log.e(TAG, "continueGroup error: %s", error.getMessage());
+                            finishLoad(request);
+                        },
+                        () -> {
+                            finishLoad(request);
+                        }
+                );
+    }
+
+    private void update(Video item) {
+        // Liked music fix - not all videos displayed. The behavior with other playlists is buggy.
+        if (Helpers.equals(item.playlistId, Video.PLAYLIST_LIKED_MUSIC)) {
+            update(item.getGroup());
+        } else {
+            update(obtainUploadsObservable(item));
+        }
+    }
+
+    private void update(Observable<MediaGroup> group) {
+        Log.d(TAG, "update: Start loading a group...");
+
+        disposeActions();
+
+        if (getView() == null) return;
+
+        getView().showProgressBar(true);
+        long request = mLoadState.begin();
+
+        mUpdateAction = group
+                .subscribe(
+                        mediaGroup -> {
+                            if (!mLoadState.isCurrent(request)) return;
+                            update(mediaGroup);
+                            if (getView() != null) getView().showProgressBar(false);
+                        },
+                        error -> {
+                            if (!mLoadState.isCurrent(request)) return;
+                            Log.e(TAG, "update error: %s", error.getMessage());
+                            finishLoad(request);
+                            mUpdateAction = null;
+                        },
+                        () -> {
+                            finishLoad(request);
+                            mUpdateAction = null;
+                        }
+                );
+    }
+
+    private void finishLoad(long request) {
+        if (!mLoadState.finish(request)) return;
+        if (getView() != null) getView().showProgressBar(false);
+    }
+
+    public void update(MediaGroup mediaGroup) {
+        // The view could be running in the background
+        getViewManager().startView(ChannelUploadsView.class);
+
+        if (getView() == null) { // starting from outside (e.g. MediaServiceManager)
+            mPendingGroup = mediaGroup; // start loading from this group
+            return;
+        }
+
+        mBaseGroup = mBaseGroup != null ? VideoGroup.from(mBaseGroup, mediaGroup) : VideoGroup.from(mediaGroup);
+        if (mChannel != null && TextUtils.isEmpty(mBaseGroup.getTitle())) {
+            mBaseGroup.setTitle(mChannel.getTitle());
+        }
+        update(mBaseGroup);
+    }
+
+    private void update(VideoGroup group) {
+        // Do not dispose the one-shot local observable from inside its own onNext callback.
+        RxHelper.disposeActions(mScrollAction);
+        mScrollAction = null;
+        mBrowseProcessor.dispose();
+
+        if (getView() == null || group == null) {
+            if (getView() != null) getView().showProgressBar(false);
+            return;
+        }
+
+        getView().update(group);
+        mBrowseProcessor.process(group);
+
+        // Stop loading for both populated and empty results; a separate completion callback
+        // may be suppressed when a caller cancels or replaces the request.
+        getView().showProgressBar(false);
+    }
+
+    private void obtainGroup(MediaItem mediaItem, OnMediaGroup callback, OnError onError, OnComplete onComplete) {
+        Log.d(TAG, "obtainGroup: Start loading group...");
+
+        disposeActions();
+
+        mUpdateAction = obtainUploadsObservable(Video.from(mediaItem))
+                .subscribe(
+                        callback::onMediaGroup,
+                        error -> {
+                            Log.e(TAG, "obtainGroup error: %s", error.getMessage());
+                            if (onError != null) {
+                                onError.onError(error);
+                            }
+                        },
+                        () -> {
+                            if (onComplete != null) {
+                                onComplete.onComplete();
+                            }
+                        }
+                );
+    }
+
+    /**
+     * Playlist usually is the first row with media items.<br/>
+     * NOTE: before playlist may be the video description row
+     */
+    private MediaGroup findPlaylistRow(MediaItemMetadata mediaItemMetadata) {
+        if (mediaItemMetadata == null || mediaItemMetadata.getSuggestions() == null) {
+            return null;
+        }
+
+        for (MediaGroup group : mediaItemMetadata.getSuggestions()) {
+            List<MediaItem> mediaItems = group.getMediaItems();
+            if (mediaItems != null && !mediaItems.isEmpty()) {
+                return group;
+            }
+        }
+
+        return null;
+    }
+
+    public void clear() {
+        disposeActions();
+        if (getView() != null) {
+            getView().clear();
+        }
+        mChannel = null;
+        mPendingGroup = null;
+        mBaseGroup = null;
+    }
+
+    public void refresh() {
+        if (getView() == null) {
+            return;
+        }
+
+        if (mPendingGroup != null) {
+            getView().clear();
+            update(mPendingGroup);
+        } else if (mChannel != null) {
+            getView().clear();
+            update(mChannel);
+        }
+    }
+}
