@@ -1,6 +1,30 @@
 {
   "package": {
-    "downloadUrl": "https://github.com/bsgcl/SmartTubeLocal/releases/download/v32.71-local/SmartTube_beta_32.71_universal.apk"
+    "downloadUrl": "https://github.com/bsgcl/SmartTubeLocal/releases/download/v32.72-local/SmartTube_beta_32.72_universal.apk"
+  },
+  "32.72": {
+    "versionCode": 2475,
+    "changelog": [
+      "SmartTube LOCAL is moving to 1.0.0!",
+      "The next major release of SmartTube LOCAL will introduce:",
+      "Native offline library indexing. No more external catalogue scripts required.",
+      "USB and attached storage support alongside SMB.",
+      "Built-in offline SponsorBlock management.",
+      "An independent Android package and signing certificate.",
+      "Version 32.72 is the final planned release under the original package ID. Technically, it is identical to 32.71.",
+      "SmartTube LOCAL 1.0.0 will require a one-time installation. Back up your settings before migrating.",
+      "Your current installation will remain usable INDEFINITELY for offline playback. No action is required at this time. However, if you wish to upgrade to 1.0.0, please visit https://github.com/bsgcl/SmartTubeLocal for a one-time APK download and installation.",
+      "Target release date: mid-December 2026.",
+      "As always - Your TV. Your rules."
+    ]
+  },
+  "32.71": {
+    "versionCode": 2474,
+    "changelog": [
+      "Added archived YouTube upload dates and descriptions to local Video Info.",
+      "Improved Local Library search, recommendations, channel navigation and visible-card artwork loading.",
+      "Preserved profile-scoped AUTO and LOCAL ONLY operation and offline local playback."
+    ]
   },
   "32.66": {
     "versionCode": 2472,
@@ -66,14 +90,6 @@
     "versionCode": 2443,
     "changelog": [
       "SmartTube Local release"
-    ]
-  },
-  "32.71": {
-    "versionCode": 2474,
-    "changelog": [
-      "Added archived YouTube upload dates and descriptions to local Video Info.",
-      "Improved Local Library search, recommendations, channel navigation and visible-card artwork loading.",
-      "Preserved profile-scoped AUTO and LOCAL ONLY operation and offline local playback."
     ]
   }
 }
